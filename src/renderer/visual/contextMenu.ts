@@ -6,7 +6,8 @@ import { api, getState, gotoSource, mainFile, openContextMenu, setState, type Me
 import { insertLink, insertMenu, newComment, followAtCursor } from '../commands';
 import { HIGHLIGHTS, TEXT_COLORS } from './marks';
 import { TABLE_STYLES } from '../../shared/latex/table';
-import { setColumnAlign, setTableBlockAttrs, tableBlockAt } from './table';
+import { applyNumberFormat, selectColumnOrRow, setColumnAlign, setTableBlockAttrs, tableBlockAt } from './table';
+import { stepDecimals } from '../../shared/latex/numfmt';
 import { addColumn, deleteColumn } from '../components/Toolbar';
 import { editorBlockLines } from './VisualEditor';
 import { followCite } from './navigate';
@@ -93,6 +94,13 @@ export function visualContextMenu(ed: Editor, e: MouseEvent) {
       { label: 'Merge cells', disabled: !ed.can().mergeCells(), run: () => c().mergeCells().run() },
       { label: 'Split cell', disabled: !ed.can().splitCell(), run: () => c().splitCell().run() },
       { label: 'Toggle header cells', run: () => c().toggleHeaderCell().run() },
+      { label: 'Select column', run: () => selectColumnOrRow(ed, 'column') },
+      { label: 'Select row', run: () => selectColumnOrRow(ed, 'row') },
+      { separator: true },
+      { label: 'Number format…', run: () => setState({ dialog: 'numberFormat' }) },
+      { label: 'Increase decimal', run: () => applyNumberFormat(ed, (f, text) => stepDecimals(f, text, 1)) },
+      { label: 'Decrease decimal', run: () => applyNumberFormat(ed, (f, text) => stepDecimals(f, text, -1)) },
+      { separator: true },
       { label: 'Align column', submenu: [
         { label: 'Left', run: () => setColumnAlign(ed, 'l') }, { label: 'Centre', run: () => setColumnAlign(ed, 'c') }, { label: 'Right', run: () => setColumnAlign(ed, 'r') },
       ] },

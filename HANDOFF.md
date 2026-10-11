@@ -29,6 +29,19 @@ Moving from Cowork to Claude Code. Project conventions and gotchas: `CLAUDE.md`.
    re-check, Settings → Detect again) · Settings page incl. read-only shortcuts (F1) ·
    context menus · error boundary · fixed a compile-breaking support-macro bug.
 
+## Unreleased (after 0.2.1)
+- Tables: 7 styles (+ Horizontal lines, Boxed), text size, row spacing (\arraystretch),
+  header shading, wrap-at-width columns; Excel-style number formats per cell (Integer,
+  Number, Percentage, Currency $/€/£/¥, Scientific; decimals or significant figures;
+  thousands separator; 4 negative styles; ± decimal; value box; Format dialog) stored as
+  `\qnum` so full precision survives. Table toolbar floats (no page shift).
+- Windows: Win-key combos never intercepted; AltGr safe; real maximize (Win+Up/Snap),
+  square corners, auto-hide taskbar reachable, window size/maximized state remembered;
+  reload/DevTools accelerators only in dev builds.
+- Verified on Sid's machine (Win 11, 200 %, auto-hide taskbar) with scripted checks; a
+  physical Win+Up keystroke could not be injected (Explorer ignores synthetic Win combos),
+  the equivalent SC_MAXIMIZE was verified.
+
 ## Verification status
 - Passing: `npm run typecheck`, `npm test` (23), full `npm run e2e` (0 console errors) on Linux/xvfb
   with TeX Live; compile of the support macros checked with pdflatex.

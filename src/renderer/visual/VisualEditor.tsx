@@ -60,7 +60,8 @@ export function VisualEditor() {
   const editor = useEditor({
     extensions: extensions(),
     content: toDocJson(parsedMain()) as any,
-    editorProps: { attributes: { spellcheck: 'true', 'aria-label': 'Report body' } },
+    // keep the caret clear of the floating table toolbar when typing near the top
+    editorProps: { attributes: { spellcheck: 'true', 'aria-label': 'Report body' }, scrollMargin: { top: 56, bottom: 24, left: 5, right: 5 }, scrollThreshold: { top: 56, bottom: 24, left: 0, right: 0 } },
     onUpdate: ({ editor: ed }) => {
       window.clearTimeout(updateTimer.current);
       pending.current = () => {

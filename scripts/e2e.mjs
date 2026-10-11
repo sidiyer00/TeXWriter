@@ -203,6 +203,55 @@ await step('table', async () => {
   await fmt.getByRole('button', { name: 'Properties' }).waitFor();
   if (await win.locator('.panel-right').count()) throw new Error('panel did not close');
 });
+await step('table-numbers', async () => {
+  const tbar = win.getByRole('toolbar', { name: 'Table' });
+  const cell = win.locator('.tblock td').nth(1); // first body row, second column
+  const cellText = async () => (await cell.innerText()).trim();
+  // entering a table must not move the page: the table toolbar floats
+  await win.locator('.ProseMirror > p').first().click();
+  await win.waitForTimeout(300);
+  if (await tbar.count()) throw new Error('table toolbar shown outside a table');
+  await cell.scrollIntoViewIfNeeded();
+  const y0 = (await cell.boundingBox()).y;
+  await cell.click();
+  await tbar.waitFor();
+  await win.waitForTimeout(300);
+  const y1 = (await cell.boundingBox()).y;
+  if (Math.abs(y1 - y0) > 1) throw new Error(`document moved when the table toolbar appeared (${y0} → ${y1})`);
+  // Excel-style formats keep the full value
+  await win.keyboard.type('0.12345');
+  await tbar.getByRole('combobox', { name: 'Number format' }).selectOption('percent');
+  if ((await cellText()) !== '12.35%') throw new Error(`percentage: ${await cellText()}`);
+  await tbar.getByRole('button', { name: /^Increase decimal/ }).click();
+  if ((await cellText()) !== '12.345%') throw new Error(`increase decimal: ${await cellText()}`);
+  await tbar.getByRole('button', { name: /^Decrease decimal/ }).click();
+  await tbar.getByRole('button', { name: /^Decrease decimal/ }).click();
+  if ((await cellText()) !== '12.3%') throw new Error(`decrease decimal: ${await cellText()}`);
+  const v = await tbar.getByRole('textbox', { name: /Cell value/ }).inputValue();
+  if (v !== '0.12345') throw new Error(`value box shows ${v}`);
+  await win.waitForTimeout(1200);
+  if (!texNow().includes('\\qnum[pct,d1]{0.12345}{12.3\\%}')) throw new Error('number format not serialized');
+  // a number typed into a formatted cell takes the format when the cursor leaves it
+  await cell.click();
+  await win.waitForTimeout(300);
+  await win.keyboard.press('End');
+  await win.keyboard.press('Shift+Home');
+  await win.keyboard.type('7.5');
+  await win.keyboard.press('Tab');
+  await win.waitForTimeout(300);
+  if ((await cellText()) !== '7.5%') throw new Error(`typed entry not formatted: ${await cellText()}`);
+  // the full dialog: currency, negatives in parentheses
+  await cell.click();
+  await win.waitForTimeout(300);
+  await tbar.getByRole('button', { name: /^Number format: decimals/ }).click();
+  const dlg = win.getByRole('dialog', { name: 'Number format' });
+  await dlg.getByRole('radio', { name: /^Currency/ }).click();
+  await dlg.getByRole('radio', { name: /^\(1,234\.10\)$/ }).check();
+  await shot('14b-number-format');
+  await dlg.getByRole('button', { name: 'Apply' }).click();
+  if ((await cellText()) !== '$0.08') throw new Error(`currency: ${await cellText()}`);
+  await shot('14c-table-numbers');
+});
 await step('comments', async () => {
   const p = win.locator('.ProseMirror > p').nth(1);
   await p.scrollIntoViewIfNeeded();
@@ -328,6 +377,14 @@ await step('settings', async () => {
   await win.getByText('Keyboard shortcuts').first().waitFor();
   await shot('19-settings');
   await win.getByRole('button', { name: /Back to document/ }).click();
+});
+await step('system-shortcuts', async () => {
+  // the Windows key belongs to the OS: Win+S (search), Win+Shift+S (snipping), Win+1…
+  const prevented = (init) => win.evaluate((i) => { const ev = new KeyboardEvent('keydown', { ...i, bubbles: true, cancelable: true }); window.dispatchEvent(ev); return ev.defaultPrevented; }, init);
+  for (const k of [{ key: 's', metaKey: true }, { key: 'S', metaKey: true, shiftKey: true }, { key: '1', metaKey: true }, { key: 'F1', metaKey: true }]) {
+    if (await prevented(k)) throw new Error(`Quire intercepted ${JSON.stringify(k)}`);
+  }
+  if (!(await prevented({ key: 's', ctrlKey: true }))) throw new Error('Ctrl+S not handled');
 });
 await step('home-again', async () => {
   await win.getByRole('button', { name: 'Quire home' }).click();

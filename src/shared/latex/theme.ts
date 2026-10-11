@@ -54,7 +54,7 @@ const hex = (s: string) => s.replace(/^#/, '').toUpperCase().padEnd(6, '0').slic
 const tex = (s: string) => s.replace(/([%&#_$])/g, '\\$1');
 
 /** Version of the support macros below; bump when they change so projects are migrated. */
-export const SUPPORT_VERSION = 'quire-support-v3';
+export const SUPPORT_VERSION = 'quire-support-v4';
 
 /** Macros the visual editor emits (highlights, merged table cells). Safe to load twice. */
 /**
@@ -74,6 +74,8 @@ export const SUPPORT_MACROS = [
   '\\fi',
   '\\ifx\\multirow\\undefined\\providecommand{\\multirow}[3]{#3}\\fi',
   '\\ifx\\rowcolors\\undefined\\providecommand{\\rowcolors}[3]{}\\fi',
+  '% \\qnum[format]{value}{shown}: number-formatted table cell; prints only the shown text',
+  '\\providecommand{\\qnum}[3][]{#3}',
 ];
 
 export function themeBlock(t: ThemeSettings): string {

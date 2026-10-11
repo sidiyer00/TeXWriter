@@ -20,6 +20,7 @@ import { parseInline } from '../../shared/latex/inline';
 import { TextColor, QuireHighlight } from './marks';
 import { TableBlock, QTable, QTableRow, QTableHeader, QTableCell } from './table';
 import { Find } from './find';
+import { isMod } from '../keys';
 import { Comments } from './comments';
 import { followCite, followLabel, followUrl } from './navigate';
 
@@ -460,7 +461,7 @@ export const FollowLinks = Extension.create({
     return [new Plugin({
       props: {
         handleClickOn: (_view, _pos, node, _nodePos, event) => {
-          if (!(event.ctrlKey || event.metaKey)) return false;
+          if (!isMod(event)) return false;
           if (node.type.name === 'crossRef') { void followLabel(node.attrs.key); return true; }
           if (node.type.name === 'citation') { void followCite(String(node.attrs.keys).split(',')[0].trim()); return true; }
           if (node.type.name === 'inlineRaw') {
@@ -470,7 +471,7 @@ export const FollowLinks = Extension.create({
           return false;
         },
         handleClick: (view, pos, event) => {
-          if (!(event.ctrlKey || event.metaKey)) return false;
+          if (!isMod(event)) return false;
           const $p = view.state.doc.resolve(pos);
           const link = $p.marks().find((m) => m.type.name === 'link') ?? view.state.doc.nodeAt(pos)?.marks.find((m) => m.type.name === 'link');
           if (link) { followUrl(link.attrs.href); return true; }

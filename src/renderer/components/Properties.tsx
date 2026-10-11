@@ -1,7 +1,7 @@
 // Right panel: settings for whatever is selected in the visual editor.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MathInput, type MathInputHandle } from './MathInput';
-import { TABLE_STYLES } from '../../shared/latex/table';
+import { HEADER_FILLS, TABLE_SIZES, TABLE_SPACING, TABLE_STYLES } from '../../shared/latex/table';
 import { editorRef } from '../visual/editorRef';
 import { texToHtml } from '../visual/nodes';
 import { allDiagnostics, api, getRun, gotoSource, guard, mainBlockLines, mainFile, refreshBlock, restoreBlock, setState, unlinkBlock, updateBlockConfig, useStore, latestRun } from '../store';
@@ -118,19 +118,39 @@ function TablePanel({ pos, attrs }: { pos: number; attrs: Record<string, any> })
             <label key={t.id} className="chk" title={t.hint}><input type="radio" name="tstyle" checked={(attrs.style ?? 'booktabs') === t.id} onChange={() => set({ style: t.id })} /><span><b style={{ fontWeight: 500 }}>{t.label}</b> <span className="small muted">— {t.hint}</span></span></label>
           ))}
         </div>
-        <label className="chk"><input type="checkbox" checked={attrs.size === 'small'} onChange={(e) => set({ size: e.target.checked ? 'small' : '' })} />Smaller font</label>
+        <div className="row" style={{ gap: 8 }}>
+          <label className="f grow">Text size<select className="field" value={attrs.size || ''} onChange={(e) => set({ size: e.target.value })}>{TABLE_SIZES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select></label>
+          <label className="f grow" title={floating ? '' : 'Row spacing needs a numbered table (float)'}>Row spacing<select className="field" disabled={!floating} value={attrs.stretch || ''} onChange={(e) => set({ stretch: e.target.value })}>{TABLE_SPACING.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select></label>
+        </div>
+        <label className="f">Header shading
+          <div className="row" style={{ gap: 6 }}>
+            {HEADER_FILLS.map((h) => (
+              <button key={h.id} className="swatch" title={h.label} aria-label={`Header shading: ${h.label}`} aria-pressed={(attrs.headerFill || '') === h.id}
+                style={{ background: h.id ? `#${h.id}` : 'repeating-linear-gradient(45deg,#fff 0 4px,#E8E4DD 4px 5px)', outline: (attrs.headerFill || '') === h.id ? '2px solid var(--accent)' : undefined, outlineOffset: 1 }}
+                onClick={() => set({ headerFill: h.id })} />
+            ))}
+          </div>
+        </label>
       </div>
       <div className="sec">
         <div className="lbl">Columns</div>
-        <div className="row wrap" style={{ gap: 4 }}>
-          {cols.map((c, i) => (
-            <select key={i} className="field" aria-label={`Column ${i + 1} alignment`} style={{ width: 64, height: 28 }} value={/^[lcr]$/.test(c) ? c : 'l'}
-              onChange={(e) => { const n = [...cols]; n[i] = e.target.value; set({ cols: n.join(' ') }); }}>
-              <option value="l">{i + 1}: L</option><option value="c">{i + 1}: C</option><option value="r">{i + 1}: R</option>
-            </select>
-          ))}
+        <div className="col" style={{ gap: 4 }}>
+          {cols.map((c, i) => {
+            const wrap = /^p\{([^}]*)\}$/.exec(c);
+            const update = (v: string) => { const n = [...cols]; n[i] = v; set({ cols: n.join(' ') }); };
+            return (
+              <div key={i} className="row" style={{ gap: 6 }}>
+                <span className="small muted" style={{ width: 54 }}>Column {i + 1}</span>
+                <select className="field" aria-label={`Column ${i + 1} alignment`} style={{ width: 120, height: 28 }} value={wrap ? 'p' : /^[lcr]$/.test(c) ? c : 'l'}
+                  onChange={(e) => update(e.target.value === 'p' ? 'p{3cm}' : e.target.value)}>
+                  <option value="l">Left</option><option value="c">Centre</option><option value="r">Right</option><option value="p">Wrap at width</option>
+                </select>
+                {wrap && <Debounced key={`${i}-${wrap[1]}`} label="" mono value={wrap[1]} placeholder="3cm" onCommit={(v) => { const w = v.trim(); if (/^\d*\.?\d+(cm|mm|in|pt|em)$/.test(w)) update(`p{${w}}`); }} />}
+              </div>
+            );
+          })}
         </div>
-        <div className="small muted">Merge cells by dragging across them, then Merge cells in the table toolbar or right-click menu. Header rows above the first rule print as the table head; merged header cells get a partial rule underneath (multi-level headers).</div>
+        <div className="small muted">Merge cells by dragging across them, then Merge cells in the table toolbar or right-click menu. Header rows above the first rule print as the table head; merged header cells get a partial rule underneath (multi-level headers). Number formats (decimals, significant figures, %, currency) are set per cell from the table toolbar.</div>
       </div>
       <div className="sec">
         <div className="lbl">Caption and label</div>

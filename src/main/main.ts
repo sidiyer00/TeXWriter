@@ -28,17 +28,69 @@ function send(channel: string, payload: unknown) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
+// ------------------------------------------------------------------ window placement
+
+interface WindowState { x: number; y: number; width: number; height: number; maximized: boolean }
+const windowStateFile = () => path.join(app.getPath('userData'), 'window-state.json');
+
+function readWindowState(): WindowState | null {
+  try {
+    const s = JSON.parse(fs.readFileSync(windowStateFile(), 'utf8')) as WindowState;
+    return [s.x, s.y, s.width, s.height].every(Number.isFinite) ? s : null;
+  } catch { return null; }
+}
+
+function saveWindowState(w: BrowserWindow) {
+  const b = w.getNormalBounds();
+  try { fs.writeFileSync(windowStateFile(), JSON.stringify({ ...b, maximized: w.isMaximized() })); } catch { /* not fatal */ }
+}
+
+/**
+ * Initial bounds: the last session's if they still fit a connected display, otherwise a
+ * centred window that is clearly smaller than the work area. A restored (not maximized)
+ * window must never cover a whole monitor: Windows then treats it as a full-screen app
+ * and an auto-hide taskbar no longer appears. Maximizing is left to the OS, which keeps
+ * the taskbar edge reachable, square corners, Snap and Win+Up/Down.
+ */
+function initialBounds(): { bounds: Electron.Rectangle; maximized: boolean } {
+  const saved = readWindowState();
+  if (saved) {
+    const d = screen.getDisplayMatching(saved);
+    const wa = d.workArea;
+    const visibleW = Math.min(saved.x + saved.width, wa.x + wa.width) - Math.max(saved.x, wa.x);
+    const visibleH = Math.min(saved.y + saved.height, wa.y + wa.height) - Math.max(saved.y, wa.y);
+    const coversDisplay = saved.width >= d.bounds.width && saved.height >= d.bounds.height;
+    if (visibleW >= 200 && visibleH >= 120 && !coversDisplay) {
+      const width = Math.min(saved.width, wa.width), height = Math.min(saved.height, wa.height);
+      const x = Math.min(Math.max(saved.x, wa.x), wa.x + wa.width - width);
+      const y = Math.min(Math.max(saved.y, wa.y), wa.y + wa.height - height);
+      return { bounds: { x, y, width, height }, maximized: !!saved.maximized };
+    }
+    if (coversDisplay) return { bounds: defaultBounds(d.workArea), maximized: true };
+  }
+  return { bounds: defaultBounds(screen.getPrimaryDisplay().workArea), maximized: false };
+}
+
+function defaultBounds(wa: Electron.Rectangle): Electron.Rectangle {
+  const width = Math.min(1440, Math.round(wa.width * 0.9));
+  const height = Math.min(900, Math.round(wa.height * 0.9));
+  return { x: wa.x + Math.round((wa.width - width) / 2), y: wa.y + Math.round((wa.height - height) / 2), width, height };
+}
+
 function createWindow() {
   const isMac = process.platform === 'darwin';
+  const { bounds, maximized } = initialBounds();
+  const wa = screen.getDisplayMatching(bounds).workArea;
   win = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 1024,
-    minHeight: 640,
+    ...bounds,
+    minWidth: Math.min(1024, wa.width),
+    minHeight: Math.min(640, wa.height),
     show: false,
     backgroundColor: '#EDEAE4',
     title: 'Quire',
     titleBarStyle: 'hidden',
+    // square window corners on Windows 11 (maximized windows are always square)
+    roundedCorners: false,
     ...(isMac ? { trafficLightPosition: { x: 14, y: 16 } } : { titleBarOverlay: { color: '#FBFAF8', symbolColor: '#3B3833', height: 47 } }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -49,10 +101,10 @@ function createWindow() {
     },
   });
   win.once('ready-to-show', () => {
+    if (maximized) win?.maximize();
     win?.show();
     win?.webContents.setZoomFactor(getSettings().uiZoom || 1);
   });
-  installTaskbarFix(win);
   win.on('focus', () => send('window-focus', null));
   win.webContents.on('context-menu', (_e, params) => {
     send('spell', { word: params.misspelledWord ?? '', suggestions: params.dictionarySuggestions ?? [], at: Date.now() });
@@ -62,6 +114,7 @@ function createWindow() {
     if (closing || !win) return;
     e.preventDefault();
     closing = true;
+    saveWindowState(win);
     win.webContents.send('flush');
     ipcMain.once('flushed', () => win?.destroy());
     setTimeout(() => { if (win && !win.isDestroyed()) win.destroy(); }, 2500);
@@ -79,38 +132,10 @@ function createWindow() {
 }
 
 /**
- * A window with a hidden title bar that is maximized covers the whole monitor when the
- * taskbar is set to auto-hide, and Windows then treats the app as full screen and never
- * reveals the taskbar. Keep a 1-px strip free on the taskbar's edge instead.
+ * The native menu is hidden (custom title bar) but its accelerators stay live, so it only
+ * carries the clipboard roles and full screen. Zoom is handled by the renderer; reload
+ * (Ctrl+R) and DevTools (Ctrl+Shift+I) exist only in development builds.
  */
-function installTaskbarFix(w: BrowserWindow) {
-  if (process.platform !== 'win32') return;
-  let restore: Electron.Rectangle | null = null;
-  let pseudo = false;
-  let lastNormal = w.getBounds();
-  w.on('resize', () => { if (!w.isMaximized() && !pseudo) lastNormal = w.getBounds(); });
-  w.on('move', () => { if (!w.isMaximized() && !pseudo) lastNormal = w.getBounds(); });
-  w.on('maximize', () => {
-    const d = screen.getDisplayMatching(w.getBounds());
-    const autoHide = d.workArea.height === d.bounds.height && d.workArea.width === d.bounds.width;
-    if (!autoHide) return;
-    if (pseudo && restore) {
-      // second maximize request while pseudo-maximized acts as "restore"
-      pseudo = false;
-      w.unmaximize();
-      w.setBounds(restore);
-      return;
-    }
-    restore = lastNormal;
-    pseudo = true;
-    w.unmaximize();
-    const wa = d.workArea;
-    w.setBounds({ x: wa.x, y: wa.y, width: wa.width, height: wa.height - 1 });
-  });
-  w.on('will-resize', () => { pseudo = false; });
-  w.on('will-move', () => { pseudo = false; });
-}
-
 function buildMenu() {
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
@@ -118,8 +143,8 @@ function buildMenu() {
     {
       label: 'View',
       submenu: [
-        { role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' },
-        { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' },
+        ...(DEV_URL ? [{ role: 'reload' as const }, { role: 'toggleDevTools' as const }, { type: 'separator' as const }] : []),
+        { role: 'togglefullscreen' },
       ],
     },
   ];

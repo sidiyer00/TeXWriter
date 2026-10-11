@@ -2,14 +2,15 @@
 // narrow, the least important ones move into the "More" menu instead of wrapping.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { editorRef } from '../visual/editorRef';
-import { getState, setState, togglePanel, useStore, mainFile, type MenuItem } from '../store';
+import { getState, promptText, setState, toast, togglePanel, useStore, mainFile, type MenuItem } from '../store';
 import { insertEquation, insertFigure, insertInlineMath, insertLink, newComment, insertMenu } from '../commands';
 import { MenuList, below, type Anchor } from './Menu';
 import { useOutside } from './Chrome';
 import { Down, List, OList } from './Icons';
 import { HIGHLIGHTS, TEXT_COLORS, cssColor } from '../visual/marks';
-import { columnAlignAt, setColumnAlign, setTableBlockAttrs, tableBlockAt, currentColumns } from '../visual/table';
-import { TABLE_STYLES } from '../../shared/latex/table';
+import { applyNumberFormat, columnAlignAt, currentNumber, selectColumnOrRow, setCellValue, setColumnAlign, setTableBlockAttrs, tableBlockAt, currentColumns } from '../visual/table';
+import { HEADER_FILLS, TABLE_SIZES, TABLE_SPACING, TABLE_STYLES } from '../../shared/latex/table';
+import { NUM_KINDS, defaultFormat, describeFormat, stepDecimals, type NumKind } from '../../shared/latex/numfmt';
 
 interface Item { id: string; group: string; priority: number; node: ReactNode; menu?: MenuItem }
 
@@ -176,14 +177,15 @@ export function FormatToolbar() {
   ];
   const extra = insertMenu().filter((m) => m.label && ['Footnote', 'Code block', 'Callout', 'Page break', 'Raw LaTeX block', 'Test result…'].includes(m.label));
   return (
-    <>
+    <div className="toolbar-stack">
       {/* once the panel is open its own tabs take over; these come back when it is closed */}
       <OverflowBar label="Formatting" items={items} extra={extra} right={panel.open ? null : <>
         <button className="tb" title="Comments  Ctrl+Alt+C" onClick={() => togglePanel('comments')}>Comments{comments ? <span className="countpill">{comments}</span> : null}</button>
         <button className="tb" title="Properties panel  Ctrl+Alt+P" onClick={() => togglePanel('properties')}>Properties</button>
       </>} />
+      {/* floats over the page instead of pushing it down when the cursor enters a table */}
       {ed?.isActive('table') && <TableToolbar />}
-    </>
+    </div>
   );
 }
 
@@ -230,15 +232,56 @@ function CellColor() {
   );
 }
 
+/** Excel's formula bar for a table cell: the full-precision value behind the formatted text. */
+function ValueBox({ value, disabled }: { value: string | null; disabled: boolean }) {
+  const [v, setV] = useState(value ?? '');
+  const [bad, setBad] = useState(false);
+  useEffect(() => { setV(value ?? ''); setBad(false); }, [value]);
+  const commit = () => {
+    const ed = editorRef.current;
+    if (!ed || v === (value ?? '') || !v.trim()) return;
+    if (!setCellValue(ed, v)) setBad(true);
+  };
+  return (
+    <input className={`field mono tvalue ${bad ? 'bad' : ''}`} aria-label="Cell value (full precision)" title="Full-precision value of this cell. Type a number and press Enter." placeholder={disabled ? '' : 'Value'} disabled={disabled}
+      value={v} onChange={(e) => { setV(e.target.value); setBad(false); }} onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); editorRef.current?.commands.focus(); } if (e.key === 'Escape') { setV(value ?? ''); editorRef.current?.commands.focus(); } }} />
+  );
+}
+
 function TableToolbar() {
   const ed = editorRef.current!;
   const tb = tableBlockAt(ed);
   const c = () => ed.chain().focus();
   const md = (e: React.MouseEvent) => e.preventDefault();
   const align = columnAlignAt(ed);
-  const b = (id: string, label: string, run: () => void, title?: string, pressed?: boolean) => <button className="tb" data-cmd={id} title={title ?? label} aria-pressed={pressed} onMouseDown={md} onClick={run}>{label}</button>;
+  const cur = currentNumber(ed);
+  const fmt = cur?.format ?? null;
+  const ref = useRef<HTMLDivElement>(null);
+  // the bar floats over the top of the page: if it lands on the caret, scroll the caret clear once
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const bottom = el.getBoundingClientRect().bottom;
+    const top = ed.view.coordsAtPos(ed.state.selection.head).top;
+    if (top < bottom + 6) el.closest('.main')?.querySelector('.doc-canvas')?.scrollBy({ top: top - bottom - 12 });
+  }, []);
+  const b = (id: string, label: ReactNode, run: () => void, title?: string, pressed?: boolean, disabled?: boolean) => <button className="tb" data-cmd={id} title={title ?? (typeof label === 'string' ? label : '')} aria-label={title ?? (typeof label === 'string' ? label : undefined)} aria-pressed={pressed} disabled={disabled} onMouseDown={md} onClick={run}>{label}</button>;
+  const setKind = (k: NumKind | 'text') => applyNumberFormat(ed, (f) => (k === 'text' ? null : f && f.kind === k ? f : defaultFormat(k)));
+  const step = (d: 1 | -1) => applyNumberFormat(ed, (f, text) => stepDecimals(f, text, d));
+  const canSep = !!fmt && fmt.kind !== 'scientific';
   const items: Item[] = [
     { id: 't-label', group: 'a', priority: 0, node: <span className="lbl" style={{ padding: '0 6px' }}>Table</span> },
+    { id: 'nkind', group: 'num', priority: 1, node: (
+      <select className="field" aria-label="Number format" title={describeFormat(fmt)} style={{ height: 28, width: 118 }} disabled={!cur || cur.header} value={fmt?.kind ?? 'text'} onChange={(e) => setKind(e.target.value as NumKind | 'text')}>
+        <option value="text">Text</option>
+        {NUM_KINDS.map((k) => <option key={k.kind} value={k.kind}>{k.label}</option>)}
+      </select>), menu: { label: 'Number format', submenu: [{ label: 'Text', checked: !fmt, run: () => setKind('text') }, ...NUM_KINDS.map((k) => ({ label: k.label, checked: fmt?.kind === k.kind, run: () => setKind(k.kind) }))] } },
+    { id: 'dec-', group: 'num', priority: 1, node: b('dec-', <span className="decglyph">.0<small>−</small></span>, () => step(-1), 'Decrease decimal (fewer digits)', undefined, !cur || cur.header), menu: { label: 'Decrease decimal', run: () => step(-1) } },
+    { id: 'dec+', group: 'num', priority: 1, node: b('dec+', <span className="decglyph">.00<small>+</small></span>, () => step(1), 'Increase decimal (more digits)', undefined, !cur || cur.header), menu: { label: 'Increase decimal', run: () => step(1) } },
+    { id: 'sep', group: 'num', priority: 2, node: b('sep', ',', () => applyNumberFormat(ed, (f) => (f && f.kind !== 'scientific' ? { ...f, thousands: !fmt?.thousands } : f)), 'Thousands separator (1,234)', !!fmt?.thousands, !canSep), menu: { label: 'Thousands separator', checked: !!fmt?.thousands, disabled: !canSep, run: () => applyNumberFormat(ed, (f) => (f && f.kind !== 'scientific' ? { ...f, thousands: !fmt?.thousands } : f)) } },
+    { id: 'nfmt', group: 'num', priority: 2, node: b('nfmt', 'Format…', () => setState({ dialog: 'numberFormat' }), 'Number format: decimals or significant figures, currency, negatives…', undefined, !cur || cur.header), menu: { label: 'Number format…', run: () => setState({ dialog: 'numberFormat' }) } },
+    { id: 'nval', group: 'num', priority: 2, node: <ValueBox value={cur?.value ?? null} disabled={!cur || cur.header} />, menu: { label: 'Cell value…', disabled: !cur || cur.header, run: () => void promptText('Cell value', 'Full-precision value (the cell shows it in its number format)', cur?.value ?? '').then((v) => { if (v != null && !setCellValue(ed, v)) toast('Not a number.', 'err'); }) } },
     { id: 'row-above', group: 'rows', priority: 1, node: b('row-above', '+ Row above', () => c().addRowBefore().run()), menu: { label: 'Insert row above', run: () => c().addRowBefore().run() } },
     { id: 'row-below', group: 'rows', priority: 1, node: b('row-below', '+ Row below', () => c().addRowAfter().run()), menu: { label: 'Insert row below', run: () => c().addRowAfter().run() } },
     { id: 'col-left', group: 'cols', priority: 2, node: b('col-left', '+ Col left', () => addColumn('left')), menu: { label: 'Insert column left', run: () => addColumn('left') } },
@@ -257,14 +300,20 @@ function TableToolbar() {
         {TABLE_STYLES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
       </select>), menu: { label: 'Table style', submenu: TABLE_STYLES.map((t) => ({ label: t.label, checked: tb?.node.attrs.style === t.id, run: () => setTableBlockAttrs(ed, { style: t.id }) })) } },
   ];
+  const ta = tb?.node.attrs ?? {};
   const extra: MenuItem[] = [
-    { label: 'Caption above table', checked: tb?.node.attrs.captionPos !== 'bottom', run: () => setTableBlockAttrs(ed, { captionPos: 'top' }) },
-    { label: 'Caption below table', checked: tb?.node.attrs.captionPos === 'bottom', run: () => setTableBlockAttrs(ed, { captionPos: 'bottom' }) },
-    { label: 'Smaller font', checked: tb?.node.attrs.size === 'small', run: () => setTableBlockAttrs(ed, { size: tb?.node.attrs.size === 'small' ? '' : 'small' }) },
+    { label: 'Select column', run: () => selectColumnOrRow(ed, 'column') },
+    { label: 'Select row', run: () => selectColumnOrRow(ed, 'row') },
+    { separator: true },
+    { label: 'Text size', submenu: TABLE_SIZES.map((s) => ({ label: s.label, checked: (ta.size || '') === s.id, run: () => setTableBlockAttrs(ed, { size: s.id }) })) },
+    { label: 'Row spacing', disabled: ta.env === 'none', submenu: TABLE_SPACING.map((s) => ({ label: s.label, checked: (ta.stretch || '') === s.id, run: () => setTableBlockAttrs(ed, { stretch: s.id }) })) },
+    { label: 'Header shading', submenu: HEADER_FILLS.map((s) => ({ label: s.label, checked: (ta.headerFill || '') === s.id, run: () => setTableBlockAttrs(ed, { headerFill: s.id }) })) },
+    { label: 'Caption above table', checked: ta.captionPos !== 'bottom', run: () => setTableBlockAttrs(ed, { captionPos: 'top' }) },
+    { label: 'Caption below table', checked: ta.captionPos === 'bottom', run: () => setTableBlockAttrs(ed, { captionPos: 'bottom' }) },
     { separator: true },
     { label: 'Table properties', run: () => setState({ panel: { open: true, tab: 'properties' } }) },
     { label: 'Delete table', danger: true, run: () => { const t = tableBlockAt(ed); if (t) ed.view.dispatch(ed.state.tr.delete(t.pos, t.pos + t.node.nodeSize)); } },
   ];
   void getState;
-  return <OverflowBar label="Table" items={items} extra={extra} />;
+  return <div className="toolbar-float" ref={ref}><OverflowBar label="Table" items={items} extra={extra} /></div>;
 }

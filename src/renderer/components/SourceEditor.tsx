@@ -19,6 +19,7 @@ import { allDiagnostics, api, getState, mainBlockLines, mainFile, openContextMen
 import { editorRef } from '../visual/editorRef';
 import { documentAutocomplete } from '../latexCompletions';
 import { followInSource } from '../visual/navigate';
+import { isMod } from '../keys';
 
 /** Pick a syntax mode from the file extension; LaTeX-family files get completions too. */
 function languageFor(file: string): { parser: StreamParser<unknown> | null; latex: boolean } {
@@ -142,7 +143,7 @@ export function SourceEditor({ file }: { file: string }) {
           EditorView.domEventHandlers({
             focus: () => { editorRef.lastFocus = 'source'; },
             mousedown: (e, v) => {
-              if (!(e.ctrlKey || e.metaKey) || e.button !== 0) return false;
+              if (!isMod(e) || e.button !== 0) return false;
               const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
               if (pos === null) return false;
               const l = v.state.doc.lineAt(pos);

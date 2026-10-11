@@ -82,7 +82,7 @@ export interface State {
   spell: SpellInfo | null;
   quickOpen: boolean;
   equationModal: { pos: number; inline: boolean } | null;
-  dialog: 'insertTable' | 'shortcuts' | 'about' | null;
+  dialog: 'insertTable' | 'numberFormat' | 'shortcuts' | 'about' | null;
   prompt: { title: string; label: string; value: string; resolve: (v: string | null) => void } | null;
   picker: 'cite' | 'ref' | null;
   /** bumps when the visual editor instance changes */
@@ -611,7 +611,7 @@ async function migrateSupportMacros() {
 
 /** Main file emits \quirehl / \multirow but has no Quire preamble: add a small support block. */
 export function ensureSupportInMain(tex: string): string {
-  if (!/\\quirehl\{|\\multirow\{/.test(tex)) return tex;
+  if (!/\\quirehl\{|\\multirow\{|\\qnum\[/.test(tex)) return tex;
   const pre = state.project?.files.some((f) => f.path === 'preamble.tex') && /\\input\{preamble(\.tex)?\}/.test(tex);
   if (pre || tex.includes('quire:support begin') || /\\(newcommand|providecommand)\{?\\quirehl/.test(tex)) return tex;
   const at = tex.search(/\\begin\{document\}/);

@@ -1,12 +1,18 @@
 // Editable tables: TipTap's table schema wrapped in a `tableBlock` that carries the
-// LaTeX-level settings (caption, label, style, column alignment).
+// LaTeX-level settings (caption, label, style, column alignment, spacing, header shading).
+// Body cells can carry an Excel-style number format (see shared/latex/numfmt.ts).
 import { Node } from '@tiptap/core';
 import { NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps, type Editor } from '@tiptap/react';
 import { Table, TableRow, TableHeader, TableCell } from '@tiptap/extension-table';
-import { selectedRect } from '@tiptap/pm/tables';
+import { CellSelection, selectedRect } from '@tiptap/pm/tables';
+import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
+import type { Node as PMNode, ResolvedPos } from '@tiptap/pm/model';
 import { useId, useState } from 'react';
 import { cssColor } from './marks';
 import { RichInline } from './nodes';
+import { cellNumber, inlinePlain, numberNodes } from '../../shared/latex/table';
+import { decodeFormat, encodeFormat, parseNumberText, type NumFormat } from '../../shared/latex/numfmt';
+import type { JNode } from '../../shared/latex/model';
 
 const cellAttrs = {
   background: {
@@ -19,6 +25,18 @@ const cellAttrs = {
     parseHTML: (el: HTMLElement) => el.dataset.align ?? null,
     renderHTML: (a: Record<string, any>) => (a.align ? { 'data-align': a.align, style: `text-align:${({ l: 'left', c: 'center', r: 'right' } as Record<string, string>)[a.align] ?? 'left'}` } : {}),
   },
+  /** number format (numfmt encoding), e.g. "num,d2,sep" */
+  format: {
+    default: null,
+    parseHTML: (el: HTMLElement) => el.dataset.fmt ?? null,
+    renderHTML: (a: Record<string, any>) => (a.format ? { 'data-fmt': a.format } : {}),
+  },
+  /** full-precision value behind a formatted number */
+  value: {
+    default: null,
+    parseHTML: (el: HTMLElement) => el.dataset.value ?? null,
+    renderHTML: (a: Record<string, any>) => (a.value != null ? { 'data-value': a.value } : {}),
+  },
 };
 
 export const QTableCell = TableCell.extend({ addAttributes() { return { ...this.parent?.(), ...cellAttrs }; } });
@@ -26,6 +44,8 @@ export const QTableHeader = TableHeader.extend({ addAttributes() { return { ...t
 /** Tables only live inside a tableBlock (pasted tables get wrapped automatically). */
 export const QTable = Table.extend({ group: 'qtable' }).configure({ resizable: false, allowTableNodeSelection: true });
 export const QTableRow = TableRow;
+
+const WRAP_RE = /^p\{([^}]*)\}$/;
 
 function TableBlockView(props: ReactNodeViewProps) {
   const a = props.node.attrs;
@@ -41,11 +61,20 @@ function TableBlockView(props: ReactNodeViewProps) {
         : <span className="tcap-text" role="button" tabIndex={0} title="Click to edit the caption" onClick={() => setEditing(true)} onKeyDown={(e) => { if (e.key === 'Enter') setEditing(true); }}>{a.caption ? <RichInline latex={a.caption} /> : <i className="muted">Add a caption…</i>}</span>}
     </div>
   );
-  // column alignment from the LaTeX column spec (cells can still override it)
+  // column alignment and fixed widths from the LaTeX column spec (cells can still override alignment)
   const id = `tb${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
-  const css = cols.map((c, i) => (/^[cr]$/.test(c) ? `#${id} tr > *:nth-child(${i + 1}){text-align:${c === 'c' ? 'center' : 'right'}}` : '')).join('');
+  const css = cols.map((c, i) => {
+    const sel = `#${id} tr > *:nth-child(${i + 1})`;
+    if (/^[cr]$/.test(c)) return `${sel}{text-align:${c === 'c' ? 'center' : 'right'}}`;
+    const w = WRAP_RE.exec(c);
+    return w && /^\d*\.?\d+(cm|mm|in|pt|em)$/.test(w[1].trim()) ? `${sel}{width:${w[1].trim()};min-width:${w[1].trim()}}` : '';
+  }).join('');
+  const fill = String(a.headerFill || '');
+  const style: Record<string, string> = {};
+  if (fill) style['--thfill'] = cssColor(fill);
+  if (a.stretch) style['--tstretch'] = String(a.stretch);
   return (
-    <NodeViewWrapper className={`tblock tstyle-${a.style} ${a.size === 'small' ? 'tsmall' : ''}`} data-cols={cols.join(' ')} id={id}>
+    <NodeViewWrapper className={`tblock tstyle-${a.style} ${a.size ? `tsize-${a.size}` : ''} ${fill ? 'thfill' : ''}`} data-cols={cols.join(' ')} id={id} style={style}>
       {css && <style>{css}</style>}
       {a.captionPos !== 'bottom' && caption}
       <div className="tscroll"><NodeViewContent /></div>
@@ -62,7 +91,7 @@ export const TableBlock = Node.create({
   defining: true,
   addAttributes() {
     const r = (d: unknown) => ({ default: d, rendered: false });
-    return { caption: r(''), label: r(''), placement: r('htbp'), env: r('table'), style: r('booktabs'), cols: r(''), captionPos: r('top'), size: r('') };
+    return { caption: r(''), label: r(''), placement: r('htbp'), env: r('table'), style: r('booktabs'), cols: r(''), captionPos: r('top'), size: r(''), headerFill: r(''), stretch: r('') };
   },
   parseHTML() { return [{ tag: 'div[data-qtype="tableBlock"]', getAttrs: (el) => { try { return JSON.parse((el as HTMLElement).dataset.qattrs ?? '{}'); } catch { return {}; } } }]; },
   renderHTML({ node }) {
@@ -71,7 +100,167 @@ export const TableBlock = Node.create({
     return ['div', { 'data-qtype': 'tableBlock', 'data-qattrs': JSON.stringify(a) }, 0];
   },
   addNodeView() { return ReactNodeViewRenderer(TableBlockView); },
+  addProseMirrorPlugins() { return [numberCellPlugin]; },
 });
+
+// ----------------------------------------------------------------------------- number cells
+
+/** The table cell (body or header) around a position. */
+export function cellAround($pos: ResolvedPos): { pos: number; node: PMNode } | null {
+  for (let d = $pos.depth; d > 0; d--) {
+    const n = $pos.node(d);
+    if (n.type.name === 'tableCell' || n.type.name === 'tableHeader') return { pos: $pos.before(d), node: n };
+  }
+  return null;
+}
+
+const cellInline = (node: PMNode): JNode[] => ((node.toJSON() as JNode).content?.[0]?.content ?? []);
+
+/** Replace a cell's attributes and its single paragraph's inline content. */
+function rewriteCell(tr: Transaction, pos: number, attrs: Record<string, unknown>, content: JNode[] | null) {
+  const node = tr.doc.nodeAt(pos);
+  if (!node) return;
+  tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...attrs });
+  if (content) {
+    const para = tr.doc.type.schema.nodeFromJSON({ type: 'paragraph', ...(content.length ? { content } : {}) });
+    const cur = tr.doc.nodeAt(pos)!;
+    tr.replaceWith(pos + 1, pos + cur.nodeSize - 1, para);
+  }
+}
+
+/**
+ * When the cursor leaves a number-formatted cell, show what was typed in the cell's format
+ * (Excel's behaviour on Enter): "1234.5" becomes "$1,234.50". Text stays as typed.
+ */
+const numberCellKey = new PluginKey('quireNumberCells');
+const numberCellPlugin = new Plugin({
+  key: numberCellKey,
+  appendTransaction(trs, oldState, newState) {
+    if (!trs.some((t) => t.selectionSet || t.docChanged) || trs.some((t) => t.getMeta(numberCellKey))) return null;
+    const before = cellAround(oldState.selection.$head);
+    if (!before || before.node.type.name !== 'tableCell' || !before.node.attrs.format) return null;
+    let pos = before.pos;
+    for (const t of trs) {
+      const m = t.mapping.mapResult(pos, 1);
+      if (m.deleted) return null;
+      pos = m.pos;
+    }
+    const now = cellAround(newState.selection.$head);
+    if (now && now.pos === pos) return null; // still editing that cell
+    const node = newState.doc.nodeAt(pos);
+    if (!node || node.type.name !== 'tableCell' || !node.attrs.format) return null;
+    const content = cellInline(node);
+    const n = cellNumber(node.attrs, content);
+    if (!n) return null;
+    const want = numberNodes(n.value, n.format);
+    if (n.value === node.attrs.value && inlinePlain(content) === inlinePlain(want)) return null;
+    const tr = newState.tr.setMeta(numberCellKey, true);
+    rewriteCell(tr, pos, { value: n.value }, want);
+    return tr;
+  },
+});
+
+/** Body cells (not headers) the format commands act on: the cell selection, or the cell at the cursor. */
+function targetCells(state: EditorState, scope: 'selection' | 'column'): { pos: number; node: PMNode }[] {
+  const out: { pos: number; node: PMNode }[] = [];
+  const sel = state.selection;
+  if (scope === 'column') {
+    try {
+      const rect = selectedRect(state);
+      const seen = new Set<number>();
+      for (const rel of rect.map.cellsInRect({ left: rect.left, right: rect.right, top: 0, bottom: rect.map.height })) {
+        if (seen.has(rel)) continue;
+        seen.add(rel);
+        const pos = rect.tableStart + rel;
+        const node = state.doc.nodeAt(pos);
+        if (node?.type.name === 'tableCell') out.push({ pos, node });
+      }
+    } catch { /* not in a table */ }
+    return out;
+  }
+  if (sel instanceof CellSelection) {
+    sel.forEachCell((node, pos) => { if (node.type.name === 'tableCell') out.push({ pos, node }); });
+    return out;
+  }
+  const c = cellAround(sel.$head);
+  return c && c.node.type.name === 'tableCell' ? [c] : [];
+}
+
+/** The format and value of the cell at the cursor (for the toolbar and the dialog). */
+export function currentNumber(ed: Editor): { format: NumFormat | null; value: string | null; text: string; header: boolean } | null {
+  const c = cellAround(ed.state.selection.$head);
+  if (!c) return null;
+  const content = cellInline(c.node);
+  const format = decodeFormat(c.node.attrs.format);
+  const n = cellNumber(c.node.attrs, content);
+  const text = inlinePlain(content);
+  return { format, value: n?.value ?? (format ? null : parseNumberText(text)), text, header: c.node.type.name === 'tableHeader' };
+}
+
+/**
+ * Apply a number format to the target cells. `next` receives each cell's current format and
+ * text and returns the new format (null = plain text). Values are kept at full precision;
+ * going back to text shows the full value, like Excel's General format.
+ */
+export function applyNumberFormat(ed: Editor, next: (cur: NumFormat | null, text: string) => NumFormat | null, scope: 'selection' | 'column' = 'selection'): number {
+  const cells = targetCells(ed.state, scope).sort((a, b) => b.pos - a.pos); // back to front: positions stay valid
+  if (!cells.length) return 0;
+  const caretCell = ed.state.selection instanceof CellSelection ? null : cellAround(ed.state.selection.$head);
+  const tr = ed.state.tr.setMeta(numberCellKey, true);
+  for (const { pos, node } of cells) {
+    const content = cellInline(node);
+    const text = inlinePlain(content);
+    const cur = decodeFormat(node.attrs.format);
+    const value = cur ? cellNumber(node.attrs, content)?.value ?? null : parseNumberText(text);
+    const f = next(cur, text);
+    if (!f) {
+      if (cur) rewriteCell(tr, pos, { format: null, value: null }, value != null ? [{ type: 'text', text: value }] : null);
+      continue;
+    }
+    if (value == null) { rewriteCell(tr, pos, { format: encodeFormat(f), value: null }, null); continue; }
+    rewriteCell(tr, pos, { format: encodeFormat(f), value }, numberNodes(value, f));
+  }
+  if (caretCell) caretToCellEnd(tr, tr.mapping.map(caretCell.pos));
+  ed.view.dispatch(tr);
+  ed.view.focus();
+  return cells.length;
+}
+
+/**
+ * Replacing a cell's text would otherwise map a caret inside it to the next cell; keep it
+ * at the end of the cell's text so the toolbar keeps describing the cell just formatted.
+ */
+function caretToCellEnd(tr: Transaction, cellPos: number) {
+  const cell = tr.doc.nodeAt(cellPos);
+  const para = cell?.firstChild;
+  if (!cell || !para?.isTextblock) return;
+  tr.setSelection(TextSelection.create(tr.doc, cellPos + 1 + para.nodeSize - 1));
+}
+
+/** Set the full-precision value of the cell at the cursor (the toolbar's value box). */
+export function setCellValue(ed: Editor, input: string): boolean {
+  const c = cellAround(ed.state.selection.$head);
+  if (!c || c.node.type.name !== 'tableCell') return false;
+  const f = decodeFormat(c.node.attrs.format);
+  const v = parseNumberText(input, false);
+  if (v == null) return false;
+  const tr = ed.state.tr.setMeta(numberCellKey, true);
+  rewriteCell(tr, c.pos, { value: f ? v : null }, f ? numberNodes(v, f) : [{ type: 'text', text: v }]);
+  caretToCellEnd(tr, c.pos);
+  ed.view.dispatch(tr);
+  return true;
+}
+
+/** Select whole columns / rows of the current cell selection. */
+export function selectColumnOrRow(ed: Editor, what: 'column' | 'row') {
+  const { state } = ed;
+  const sel = state.selection;
+  const anchor = sel instanceof CellSelection ? sel.$anchorCell : (() => { const c = cellAround(sel.$head); return c ? state.doc.resolve(c.pos) : null; })();
+  const head = sel instanceof CellSelection ? sel.$headCell : anchor;
+  if (!anchor || !head) return;
+  ed.view.dispatch(state.tr.setSelection(what === 'column' ? CellSelection.colSelection(anchor, head) : CellSelection.rowSelection(anchor, head)));
+  ed.view.focus();
+}
 
 // ----------------------------------------------------------------------------- helpers
 

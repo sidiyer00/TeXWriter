@@ -2,21 +2,63 @@
 //
 // Supported: table/tabular with l/c/r/p{..} columns, booktabs or \hline rules,
 // \multicolumn (merged columns), \multirow (merged rows), \cellcolor / \rowcolor,
-// header rows (bold), multi-level headers (\cmidrule under merged header cells),
-// \rowcolors stripes, caption above or below, label, font-size command.
+// header rows (bold, optionally shaded), multi-level headers (\cmidrule under merged
+// header cells), \rowcolors stripes, caption above or below, label, font size, row
+// spacing (\arraystretch) and number-formatted cells (\qnum, see numfmt.ts).
 // Anything else stays a raw LaTeX block.
 import type { JNode } from './model';
 import { CommentInInline, parseInline, serializeInline } from './inline';
 import { findEnvEnd, matchGroup, readArgs } from './scan';
+import { NEGATIVE_RED, decodeFormat, encodeFormat, formatValue, parseNumberText, type NumFormat } from './numfmt';
 
-export type TableStyle = 'booktabs' | 'grid' | 'minimal' | 'striped' | 'plain';
+export type TableStyle = 'booktabs' | 'striped' | 'lines' | 'minimal' | 'boxed' | 'grid' | 'plain';
 export const TABLE_STYLES: { id: TableStyle; label: string; hint: string }[] = [
   { id: 'booktabs', label: 'Booktabs', hint: 'Top, header and bottom rules — the standard for reports' },
-  { id: 'grid', label: 'Grid', hint: 'Every cell boxed' },
-  { id: 'minimal', label: 'Minimal', hint: 'Single rule under the header' },
   { id: 'striped', label: 'Striped', hint: 'Booktabs with shaded alternate rows' },
+  { id: 'lines', label: 'Horizontal lines', hint: 'A rule under every row' },
+  { id: 'minimal', label: 'Minimal', hint: 'Single rule under the header' },
+  { id: 'boxed', label: 'Boxed', hint: 'Outer border and a rule under the header' },
+  { id: 'grid', label: 'Grid', hint: 'Every cell boxed' },
   { id: 'plain', label: 'Plain', hint: 'No rules' },
 ];
+
+export const TABLE_SIZES: { id: string; label: string }[] = [
+  { id: '', label: 'Normal' }, { id: 'small', label: 'Small' }, { id: 'footnotesize', label: 'Footnote' }, { id: 'scriptsize', label: 'Script' },
+];
+export const TABLE_SPACING: { id: string; label: string }[] = [
+  { id: '', label: 'Normal' }, { id: '1.15', label: 'Relaxed (1.15)' }, { id: '1.3', label: 'Open (1.3)' }, { id: '1.5', label: 'Wide (1.5)' },
+];
+export const HEADER_FILLS: { id: string; label: string }[] = [
+  { id: '', label: 'None' }, { id: 'F2F2F2', label: 'Light grey' }, { id: 'E5ECF8', label: 'Light blue' }, { id: 'F3ECE6', label: 'Warm' }, { id: 'E6F1EA', label: 'Light green' },
+];
+
+// ------------------------------------------------------------------ number-formatted cells
+
+/** Editor content for a formatted number: one text run, red when the format says so. */
+export function numberNodes(value: string, f: NumFormat): JNode[] {
+  const r = formatValue(value, f);
+  if (!r) return [];
+  return [{ type: 'text', text: r.text, ...(r.red ? { marks: [{ type: 'textColor', attrs: { color: NEGATIVE_RED } }] } : {}) }];
+}
+
+/** Plain text of inline content (non-text atoms make it non-numeric). */
+export function inlinePlain(nodes: JNode[] | undefined): string {
+  return (nodes ?? []).map((n) => (n.type === 'text' ? n.text ?? '' : '\u0000')).join('');
+}
+
+/**
+ * The number a formatted cell holds right now: the stored value while the visible text
+ * still matches it (full precision), otherwise whatever the user typed (null for text).
+ */
+export function cellNumber(attrs: Record<string, any> | undefined, content: JNode[] | undefined): { value: string; format: NumFormat } | null {
+  const f = decodeFormat(attrs?.format);
+  if (!f) return null;
+  const text = inlinePlain(content);
+  const stored = attrs?.value != null ? String(attrs.value) : null;
+  if (stored != null && formatValue(stored, f)?.text === text) return { value: stored, format: f };
+  const typed = parseNumberText(text, f.kind === 'percent');
+  return typed != null ? { value: typed, format: f } : null;
+}
 
 export interface CellNode extends JNode { type: 'tableCell' | 'tableHeader' }
 
@@ -51,14 +93,15 @@ function splitTop(s: string, sep: '&' | '\\\\'): string[] {
   return out;
 }
 
-function parseColSpec(spec: string): { cols: string[]; grid: boolean } | null {
+/** Column types, plus vertical rules: bars[i] is the rule left of column i (bars[n] = right edge). */
+function parseColSpec(spec: string): { cols: string[]; bars: boolean[] } | null {
   const cols: string[] = [];
-  let grid = false;
+  const bars: boolean[] = [];
   let i = 0;
   while (i < spec.length) {
     const ch = spec[i];
     if (/\s/.test(ch)) { i++; continue; }
-    if (ch === '|') { grid = true; i++; continue; }
+    if (ch === '|') { bars[cols.length] = true; i++; continue; }
     if (ch === 'l' || ch === 'c' || ch === 'r') { cols.push(ch); i++; continue; }
     if (ch === 'p' || ch === 'm' || ch === 'b') {
       if (spec[i + 1] !== '{') return null;
@@ -75,18 +118,20 @@ function parseColSpec(spec: string): { cols: string[]; grid: boolean } | null {
       if (b.arg === null) return null;
       const inner = parseColSpec(b.arg);
       if (!inner) return null;
-      for (let k = 0; k < Number(a.arg); k++) cols.push(...inner.cols);
-      grid = grid || inner.grid;
+      for (let k = 0; k < Number(a.arg); k++) {
+        if (inner.bars[0]) bars[cols.length] = true;
+        inner.cols.forEach((c, j) => { cols.push(c); if (inner.bars[j + 1]) bars[cols.length] = true; });
+      }
       i = b.end; continue;
     }
     return null; // @{}, >{}, X, S … → keep as raw LaTeX
   }
-  return cols.length ? { cols, grid } : null;
+  return cols.length ? { cols, bars: Array.from({ length: cols.length + 1 }, (_, k) => !!bars[k]) } : null;
 }
 
 const RULE_RE = /^\s*(\\(?:toprule|midrule|bottomrule|hline|addlinespace|specialrule)(?:\[[^\]]*\])?(?:\{[^}]*\}){0,3}|\\(?:cline|cmidrule)(?:\([^)]*\))?\{[^}]*\})\s*/;
 
-interface ParsedCell { colspan: number; rowspan: number; background: string | null; align: string | null; content: JNode[]; empty: boolean }
+interface ParsedCell { colspan: number; rowspan: number; background: string | null; align: string | null; content: JNode[]; empty: boolean; format: string | null; value: string | null }
 
 function cellInline(src: string): JNode[] {
   const nodes = parseInline(src.trim());
@@ -124,8 +169,31 @@ function parseCell(raw: string, rowColor: string | null): ParsedCell | null {
     s = s.slice(open + 1, e - 1).trim();
     takeColor();
   }
+  const num = parseQnum(s);
+  if (num) return { colspan, rowspan, background, align, content: num.content, empty: false, format: num.format, value: num.value };
   const content = cellInline(s);
-  return { colspan, rowspan, background, align, content, empty: s === '' };
+  return { colspan, rowspan, background, align, content, empty: s === '', format: null, value: null };
+}
+
+/** `\qnum[format]{value}{shown}` filling a whole cell. */
+function parseQnum(s: string): { format: string; value: string; content: JNode[] } | null {
+  const q = /^\\qnum\s*\[([^\]]*)\]\s*\{/.exec(s);
+  if (!q) return null;
+  const o1 = q[0].length - 1;
+  const e1 = matchGroup(s, o1);
+  if (e1 < 0) return null;
+  let o2 = e1;
+  while (s[o2] === ' ') o2++;
+  if (s[o2] !== '{') return null;
+  const e2 = matchGroup(s, o2);
+  if (e2 < 0 || s.slice(e2).trim() !== '') return null;
+  const f = decodeFormat(q[1]);
+  const value = parseNumberText(s.slice(o1 + 1, e1 - 1));
+  if (!f || value == null) return null;
+  const shown = s.slice(o2 + 1, e2 - 1).trim();
+  // shown text edited by hand in the source wins over the stored value (see cellNumber)
+  const content = formatValue(value, f)?.latex === shown ? numberNodes(value, f) : cellInline(shown);
+  return { format: encodeFormat(f), value, content };
 }
 
 function stripBold(nodes: JNode[]): JNode[] {
@@ -139,12 +207,16 @@ function para(content: JNode[]): JNode {
 }
 
 /** Parse the inside of a tabular environment into table rows. */
-function parseTabularBody(body: string, ncols: number): { rows: JNode[]; headerRows: number; striped: boolean; ruleKinds: Set<string> } | null {
+interface ParsedBody { rows: JNode[]; headerRows: number; ruleKinds: Set<string>; rulesBefore: string[][]; headerFill: string }
+
+function parseTabularBody(body: string, ncols: number): ParsedBody | null {
   if (/(^|[^\\])%/.test(body)) return null;
   const segments = splitTop(body, '\\\\');
   const rows: JNode[] = [];
   let headerRows = -1;
   const ruleKinds = new Set<string>();
+  const rulesBefore: string[][] = [[]]; // rules above row i; index rows.length = below the last row
+  const rowColors: (string | null)[] = [];
   const covered: number[] = Array(ncols).fill(0); // remaining rows covered by a multirow
   let rowsSeen = 0;
   for (let si = 0; si < segments.length; si++) {
@@ -155,6 +227,7 @@ function parseTabularBody(body: string, ncols: number): { rows: JNode[]; headerR
       if (!r) break;
       const kind = /\\(\w+)/.exec(r[1])![1];
       ruleKinds.add(kind);
+      rulesBefore[rowsSeen].push(kind);
       if (kind === 'midrule' && headerRows < 0 && rowsSeen > 0) headerRows = rowsSeen;
       seg = seg.slice(r[0].length);
     }
@@ -185,7 +258,7 @@ function parseTabularBody(body: string, ncols: number): { rows: JNode[]; headerR
       let pc: ParsedCell | null;
       try { pc = parseCell(raw, rowColor); } catch (e) { if (e instanceof CommentInInline) return null; throw e; }
       if (!pc) return null;
-      out.push({ type: 'tableCell', attrs: { colspan: pc.colspan, rowspan: pc.rowspan, background: pc.background, align: pc.align }, content: [para(pc.content)] });
+      out.push({ type: 'tableCell', attrs: { colspan: pc.colspan, rowspan: pc.rowspan, background: pc.background, align: pc.align, ...(pc.format ? { format: pc.format, value: pc.value } : {}) }, content: [para(pc.content)] });
       if (pc.rowspan > 1) for (let k = 0; k < pc.colspan; k++) covered[col + k] = pc.rowspan - 1;
       col += pc.colspan;
       ci++;
@@ -193,7 +266,9 @@ function parseTabularBody(body: string, ncols: number): { rows: JNode[]; headerR
     if (ci < cells.length && cells.slice(ci).some((c) => c.trim() !== '')) return null; // too many cells
     if (col !== ncols) return null;
     rows.push({ type: 'tableRow', content: out });
+    rowColors.push(rowColor);
     rowsSeen++;
+    rulesBefore[rowsSeen] = [];
   }
   if (!rows.length) return null;
   if (headerRows < 0) {
@@ -209,10 +284,18 @@ function parseTabularBody(body: string, ncols: number): { rows: JNode[]; headerR
     }
     if (headerRows === rows.length) headerRows = 0;
   }
+  // the same \rowcolor on every header row is the table's header shading
+  const fill = headerRows > 0 ? rowColors[0] : null;
+  const headerFill = fill && rowColors.slice(0, headerRows).every((c) => c === fill) ? fill : '';
   for (let k = 0; k < headerRows && k < rows.length; k++) {
-    rows[k].content = (rows[k].content ?? []).map((c) => ({ ...c, type: 'tableHeader', content: [para(stripBold(c.content?.[0]?.content ?? []))] }));
+    rows[k].content = (rows[k].content ?? []).map((c) => ({
+      ...c,
+      type: 'tableHeader',
+      attrs: headerFill && c.attrs?.background === headerFill ? { ...c.attrs, background: null } : c.attrs,
+      content: [para(stripBold(c.content?.[0]?.content ?? []))],
+    }));
   }
-  return { rows, headerRows, striped: false, ruleKinds };
+  return { rows, headerRows, ruleKinds, rulesBefore, headerFill };
 }
 
 /** Try to parse `\begin{table}…\end{table}` or a bare `\begin{tabular}…\end{tabular}`. */
@@ -244,7 +327,7 @@ export function parseTableBlock(src: string): JNode | null {
   let after = inner.slice(tEnd);
   if (env === 'none' && (before.trim() || after.trim())) return null;
   // extract caption / label / centering / size / rowcolors from the surroundings
-  let caption = '', label = '', captionPos: 'top' | 'bottom' = 'top', size = '', striped = false;
+  let caption = '', label = '', captionPos: 'top' | 'bottom' = 'top', size = '', striped = false, stretch = '';
   const take = (part: 'before' | 'after') => {
     let t = part === 'before' ? before : after;
     const cap = t.search(/\\caption\s*\{/);
@@ -263,6 +346,8 @@ export function parseTableBlock(src: string): JNode | null {
     if (sm) { size = sm[1]; t = t.replace(sm[0], ''); }
     const rc = /\\rowcolors\{2\}\{[^}]*\}\{[^}]*\}/.exec(t);
     if (rc) { striped = true; t = t.replace(rc[0], ''); }
+    const st = /\\renewcommand\s*\{?\\arraystretch\}?\s*\{(\d+(?:\.\d+)?)\}/.exec(t);
+    if (st) { stretch = st[1]; t = t.replace(st[0], ''); }
     if (part === 'before') before = t; else after = t;
     return t.trim() === '';
   };
@@ -271,13 +356,17 @@ export function parseTableBlock(src: string): JNode | null {
   try { parsed = parseTabularBody(body, spec.cols.length); } catch (e) { if (e instanceof CommentInInline) return null; throw e; }
   if (!parsed) return null;
   const k = parsed.ruleKinds;
-  const style: TableStyle = spec.grid ? 'grid'
+  const n = spec.cols.length;
+  const anyBar = spec.bars.some(Boolean);
+  const outerOnly = n > 1 && spec.bars[0] && spec.bars[n] && spec.bars.slice(1, n).every((b) => !b);
+  const everyRow = parsed.rulesBefore.every((r) => r.includes('hline'));
+  const style: TableStyle = anyBar ? (outerOnly ? 'boxed' : 'grid')
     : striped ? 'striped'
     : k.has('toprule') || k.has('bottomrule') || k.has('midrule') ? 'booktabs'
-    : k.has('hline') ? 'minimal' : 'plain';
+    : k.has('hline') ? (everyRow ? 'lines' : 'minimal') : 'plain';
   return {
     type: 'tableBlock',
-    attrs: { caption, label, placement, env, style, cols: spec.cols.join(' '), captionPos, size },
+    attrs: { caption, label, placement, env, style, cols: spec.cols.join(' '), captionPos, size, headerFill: parsed.headerFill, stretch },
     content: [{ type: 'table', content: parsed.rows }],
   };
 }
@@ -319,11 +408,16 @@ export function serializeTableBlock(node: JNode): string {
   const ncols = Math.max(colsAttr.length, ...occ.map((r) => r.length), 1);
   const cols = Array.from({ length: ncols }, (_, i) => colsAttr[i] || (i === 0 ? 'l' : 'r'));
   const headerRows = (() => { let n = 0; for (const r of rows) { if ((r.content ?? []).length && (r.content ?? []).every((c) => c.type === 'tableHeader')) n++; else break; } return n; })();
-  const bar = style === 'grid';
-  const spec = bar ? `|${cols.join('|')}|` : cols.join('');
+  const booktabsLike = style === 'booktabs' || style === 'striped';
+  // vertical rules: barAt(i) is the rule left of column i
+  const barAt = (i: number) => style === 'grid' || (style === 'boxed' && (i === 0 || i === ncols));
+  const spec = style === 'grid' ? `|${cols.join('|')}|` : style === 'boxed' ? `|${cols.join('')}|` : cols.join('');
+  const mcSpec = (c: number, cs: number, al: string) => `${c === 0 && barAt(0) ? '|' : ''}${al}${barAt(c + cs) ? '|' : ''}`;
+  const fill = String(a.headerFill || '').replace(/^#/, '');
+  const fillCmd = fill ? (HEXRE.test(fill) ? `\\rowcolor[HTML]{${fill.toUpperCase()}} ` : `\\rowcolor{${fill}} `) : '';
   const at = (r: number, c: number) => placed.find((p) => p.r === r && p.c === c);
   const lines: string[] = [];
-  const top = style === 'booktabs' || style === 'striped' ? '\\toprule' : bar ? '\\hline' : '';
+  const top = booktabsLike ? '\\toprule' : style === 'grid' || style === 'boxed' || style === 'lines' ? '\\hline' : '';
   if (top) lines.push(`    ${top}`);
   for (let r = 0; r < rows.length; r++) {
     const parts: string[] = [];
@@ -334,7 +428,7 @@ export function serializeTableBlock(node: JNode): string {
         const owner = placed.find((q) => q.r < r && q.c <= c && c < q.c + Number(q.cell.attrs?.colspan ?? 1) && r < q.r + Number(q.cell.attrs?.rowspan ?? 1));
         const cs = owner ? Number(owner.cell.attrs?.colspan ?? 1) : 1;
         const bg = owner ? colorPrefix(owner.cell.attrs?.background) : '';
-        if (cs > 1) parts.push(`\\multicolumn{${cs}}{${bar ? (c === 0 ? '|c|' : 'c|') : 'c'}}{${bg}}`);
+        if (cs > 1) parts.push(`\\multicolumn{${cs}}{${mcSpec(c, cs, 'c')}}{${bg}}`);
         else parts.push(bg);
         c += cs;
         continue;
@@ -343,7 +437,8 @@ export function serializeTableBlock(node: JNode): string {
       const cs = Math.max(1, Number(cell.attrs?.colspan ?? 1));
       const rs = Math.max(1, Number(cell.attrs?.rowspan ?? 1));
       const isHead = cell.type === 'tableHeader';
-      let txt = cellText(cell);
+      const num = isHead ? null : cellNumber(cell.attrs, cell.content?.[0]?.content);
+      let txt = num ? `\\qnum[${encodeFormat(num.format)}]{${num.value}}{${formatValue(num.value, num.format)!.latex}}` : cellText(cell);
       if (isHead && txt) txt = `\\textbf{${txt}}`;
       if (rs > 1) txt = `\\multirow{${rs}}{*}{${txt}}`;
       txt = colorPrefix(cell.attrs?.background) + txt;
@@ -351,25 +446,22 @@ export function serializeTableBlock(node: JNode): string {
       const colAlign = /^[lcr]$/.test(cols[c]) ? cols[c] : 'l';
       if (cs > 1 || (align && align !== colAlign)) {
         const al = align || colAlign;
-        const s2 = bar ? (c === 0 ? `|${al}|` : `${al}|`) : al;
-        txt = `\\multicolumn{${cs}}{${s2}}{${txt}}`;
+        txt = `\\multicolumn{${cs}}{${mcSpec(c, cs, al)}}{${txt}}`;
       }
       parts.push(txt);
       c += cs;
     }
-    lines.push(`    ${parts.join(' & ')} \\\\`);
+    lines.push(`    ${r < headerRows ? fillCmd : ''}${parts.join(' & ')} \\\\`);
     // rules after this row
-    if (r < headerRows - 1 && (style === 'booktabs' || style === 'striped')) {
+    const last = r === rows.length - 1;
+    if (r < headerRows - 1 && booktabsLike) {
       const cm = placed.filter((q) => q.r === r && Number(q.cell.attrs?.colspan ?? 1) > 1).map((q) => `\\cmidrule(lr){${q.c + 1}-${q.c + Number(q.cell.attrs?.colspan)}}`);
       if (cm.length) lines.push(`    ${cm.join(' ')}`);
     }
-    if (r === headerRows - 1 && r < rows.length - 1) {
-      if (style === 'booktabs' || style === 'striped') lines.push('    \\midrule');
-      else if (style === 'minimal') lines.push('    \\hline');
-    }
-    if (bar) lines.push('    \\hline');
+    if (style === 'grid' || style === 'lines') lines.push('    \\hline');
+    else if (last) { if (booktabsLike) lines.push('    \\bottomrule'); else if (style === 'boxed') lines.push('    \\hline'); }
+    else if (r === headerRows - 1) { if (booktabsLike) lines.push('    \\midrule'); else if (style === 'minimal' || style === 'boxed') lines.push('    \\hline'); }
   }
-  if (style === 'booktabs' || style === 'striped') lines.push('    \\bottomrule');
   const tabular = [`  \\begin{tabular}{${spec}}`, ...lines, '  \\end{tabular}'];
   const env: string = a.env || 'table';
   if (env === 'none') {
@@ -377,6 +469,7 @@ export function serializeTableBlock(node: JNode): string {
   }
   const out = [`\\begin{${env}}${a.placement ? `[${a.placement}]` : ''}`, '  \\centering'];
   if (a.size) out.push(`  \\${a.size}`);
+  if (/^\d+(\.\d+)?$/.test(String(a.stretch ?? ''))) out.push(`  \\renewcommand{\\arraystretch}{${a.stretch}}`);
   const cap = [a.caption ? `  \\caption{${a.caption}}` : '', a.label ? `  \\label{${a.label}}` : ''].filter(Boolean);
   if ((a.captionPos ?? 'top') === 'top') out.push(...cap);
   if (style === 'striped') out.push('  \\rowcolors{2}{black!4}{}');
@@ -394,5 +487,5 @@ export function newTable(rows: number, cols: number, style: TableStyle, label: s
     const head = r < headerRows;
     body.push({ type: 'tableRow', content: Array.from({ length: cols }, (_, c) => mk(head ? 'tableHeader' : 'tableCell', head ? (c === 0 ? 'Item' : `Column ${c}`) : '')) });
   }
-  return { type: 'tableBlock', attrs: { caption: 'Caption.', label, placement: 'htbp', env: 'table', style, cols: ['l', ...Array(cols - 1).fill('r')].join(' '), captionPos: 'top', size: '' }, content: [{ type: 'table', content: body }] };
+  return { type: 'tableBlock', attrs: { caption: 'Caption.', label, placement: 'htbp', env: 'table', style, cols: ['l', ...Array(cols - 1).fill('r')].join(' '), captionPos: 'top', size: '', headerFill: '', stretch: '' }, content: [{ type: 'table', content: body }] };
 }

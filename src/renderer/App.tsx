@@ -10,9 +10,10 @@ import { SetupScreen } from './views/Setup';
 import { SettingsScreen } from './views/Settings';
 import { Toast } from './components/Chrome';
 import { ContextMenu } from './components/Menu';
-import { AboutDialog, EquationModal, InsertTableDialog, PickerDialog, PromptDialog, QuickOpen, ShortcutsDialog } from './components/Dialogs';
+import { AboutDialog, EquationModal, InsertTableDialog, NumberFormatDialog, PickerDialog, PromptDialog, QuickOpen, ShortcutsDialog } from './components/Dialogs';
 import { followAtCursor, initZoom, insertEquation, insertInlineMath, insertLink, newComment, nextIssue, openFind, setZoom, zoomBy } from './commands';
 import { findKey, step } from './visual/find';
+import { isMod, isSystemCombo } from './keys';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -40,7 +41,8 @@ function inVisual(): boolean {
 }
 
 function onKey(e: KeyboardEvent) {
-  const mod = e.ctrlKey || e.metaKey;
+  if (isSystemCombo(e)) return;
+  const mod = isMod(e);
   const k = e.key.toLowerCase();
   const s = getState();
   const modal = !!(s.dialog || s.prompt || s.picker || s.quickOpen || s.equationModal);
@@ -136,6 +138,7 @@ export function App() {
       <PromptDialog />
       <PickerDialog />
       <InsertTableDialog />
+      <NumberFormatDialog />
       <QuickOpen />
       <ShortcutsDialog />
       <AboutDialog />

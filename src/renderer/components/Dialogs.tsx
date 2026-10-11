@@ -7,10 +7,86 @@ import { Dialog } from './Chrome';
 import { SHORTCUTS, insertBlock } from '../commands';
 import { editorRef } from '../visual/editorRef';
 import { newTable, TABLE_STYLES, type TableStyle } from '../../shared/latex/table';
+import { CURRENCIES, MAX_DIGITS, NEGATIVES, NUM_KINDS, defaultFormat, formatValue, withPrecisionMode, type NumFormat, type NumKind } from '../../shared/latex/numfmt';
+import { applyNumberFormat, currentNumber } from '../visual/table';
 import { shortAuthor } from '../../shared/latex/refs';
 import { MathInput, type MathInputHandle } from './MathInput';
 import { texToHtml } from '../visual/nodes';
 import { Search } from './Icons';
+
+/** Excel's "Format Cells → Number" for table cells. */
+export function NumberFormatDialog() {
+  const open = useStore((s) => s.dialog === 'numberFormat');
+  return open && editorRef.current ? <NumberFormatBody /> : null;
+}
+
+function NumberFormatBody() {
+  const ed = editorRef.current!;
+  const cur = useMemo(() => currentNumber(ed), [ed]);
+  const init = cur?.format ?? null;
+  const [kind, setKind] = useState<NumKind | 'text'>(init?.kind ?? 'number');
+  const [f, setF] = useState<NumFormat>(init ?? defaultFormat('number'));
+  const [scope, setScope] = useState<'selection' | 'column'>('selection');
+  const close = () => setState({ dialog: null });
+  const sample = cur?.value ?? '1234.5678';
+  const pick = (k: NumKind | 'text') => { setKind(k); if (k !== 'text') setF(init?.kind === k ? init : defaultFormat(k)); };
+  const set = (p: Partial<NumFormat>) => setF((x) => ({ ...x, ...p }));
+  const apply = () => { applyNumberFormat(ed, () => (kind === 'text' ? null : { ...f, kind }), scope); close(); };
+  const fmtd = (v: string) => (kind === 'text' ? v : formatValue(v, { ...f, kind })?.text ?? v);
+  const negSample = sample.startsWith('-') ? sample : `-${sample}`;
+  const posSample = sample.replace(/^-/, '');
+  const hasPrecision = kind !== 'text' && kind !== 'integer';
+  return (
+    <Dialog title="Number format" wide onClose={close} footer={<><button className="btn" onClick={close}>Cancel</button><button className="btn btn-pri" onClick={apply}>Apply</button></>}>
+      <div className="row" style={{ gap: 20, alignItems: 'flex-start' }}>
+        <div className="col" style={{ gap: 4, width: 170, flex: 'none' }} role="radiogroup" aria-label="Category">
+          <span className="lbl">Category</span>
+          {[{ kind: 'text' as const, label: 'Text', example: 'as typed' }, ...NUM_KINDS].map((k) => (
+            <button key={k.kind} className="opt" role="radio" aria-checked={kind === k.kind} aria-pressed={kind === k.kind} onClick={() => pick(k.kind)}>
+              <b style={{ fontWeight: 600 }}>{k.label}</b><span className="small muted">{k.example}</span>
+            </button>
+          ))}
+        </div>
+        <div className="col grow" style={{ gap: 12, minWidth: 0 }}>
+          <div className="nf-preview" aria-live="polite">
+            <span className="lbl">Preview</span>
+            <div className="row" style={{ gap: 24 }}><span className="mono">{fmtd(posSample)}</span><span className="mono" style={{ color: kind !== 'text' && (f.negative === 'red' || f.negative === 'redparens') ? '#C00000' : undefined }}>{fmtd(negSample)}</span></div>
+            {cur?.value && <span className="small muted">Cell value {cur.value} — the full value is kept; only the display changes.</span>}
+          </div>
+          {kind === 'text' && <div className="small muted">Shown exactly as typed. A number that was formatted shows its full value again (like Excel's General format).</div>}
+          {hasPrecision && (
+            <div className="row" style={{ gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <div className="seg" role="group" aria-label="Precision">
+                <button aria-pressed={!f.sig} onClick={() => setF((x) => withPrecisionMode(x, false, sample))}>Decimal places</button>
+                <button aria-pressed={f.sig} onClick={() => setF((x) => withPrecisionMode(x, true, sample))}>Significant figures</button>
+              </div>
+              <label className="f" style={{ width: 90 }}>{f.sig ? 'Figures' : 'Decimals'}
+                <input className="field" type="number" min={f.sig ? 1 : 0} max={MAX_DIGITS} value={f.digits} onChange={(e) => set({ digits: Math.max(f.sig ? 1 : 0, Math.min(MAX_DIGITS, Math.round(Number(e.target.value) || 0))) })} />
+              </label>
+            </div>
+          )}
+          {kind === 'currency' && (
+            <label className="f" style={{ width: 200 }}>Symbol
+              <select className="field" value={f.symbol} onChange={(e) => set({ symbol: e.target.value as NumFormat['symbol'] })}>{CURRENCIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select>
+            </label>
+          )}
+          {kind !== 'text' && kind !== 'scientific' && <label className="chk"><input type="checkbox" checked={f.thousands} onChange={(e) => set({ thousands: e.target.checked })} />Use thousands separator (1,234)</label>}
+          {kind !== 'text' && (
+            <div className="col" style={{ gap: 4 }} role="radiogroup" aria-label="Negative numbers">
+              <span className="lbl">Negative numbers</span>
+              {NEGATIVES.map((n) => <label key={n.id} className="chk"><input type="radio" name="nf-neg" checked={f.negative === n.id} onChange={() => set({ negative: n.id })} /><span className="mono" style={{ color: n.id.startsWith('red') ? '#C00000' : undefined }}>{n.label}</span></label>)}
+            </div>
+          )}
+          <div className="col" style={{ gap: 4 }} role="radiogroup" aria-label="Apply to">
+            <span className="lbl">Apply to</span>
+            <label className="chk"><input type="radio" name="nf-scope" checked={scope === 'selection'} onChange={() => setScope('selection')} />Selected cells</label>
+            <label className="chk"><input type="radio" name="nf-scope" checked={scope === 'column'} onChange={() => setScope('column')} />Whole column (all body rows)</label>
+          </div>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
 
 export function PromptDialog() {
   const p = useStore((s) => s.prompt);

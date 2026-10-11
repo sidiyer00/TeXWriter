@@ -63,6 +63,19 @@ Never "normalize" untouched LaTeX.
   contains a cross-ref becomes a native DOM drag and the `\autoref` turns into plain text.
 - Global shortcuts are a capture-phase `keydown` in `App.tsx`. Keep the "in a form field →
   don't intercept" guard (Ctrl+Enter in a comment box used to trigger a compile).
+- Modifiers go through `renderer/keys.ts`: `isMod` (Ctrl on Windows, Cmd on macOS) and
+  `isSystemCombo`. On Windows `metaKey` is the **Win key** — treating it as Ctrl hijacked
+  Win+S / Win+Shift+S / Win+1…; AltGr arrives as Ctrl+Alt and must type characters.
+- Window (`main.ts`): real OS maximize only. Never fake it with setBounds — a restored
+  window that covers the whole monitor makes Windows hide an auto-hide taskbar, keeps
+  rounded corners and breaks Win+Up. First-launch size fits the work area; size/maximized
+  state persist in `userData/window-state.json`. `roundedCorners: false` = square on Win 11.
+- Table number formats: cells carry `format`/`value` attrs; LaTeX is
+  `\qnum[fmt]{value}{shown}` (`\qnum` prints #3; in `SUPPORT_MACROS`). Exact decimal
+  rounding lives in `shared/latex/numfmt.ts`. Replacing a cell's text maps the caret into the
+  next cell — put it back (`caretToCellEnd`) or the toolbar describes the wrong cell.
+- The table toolbar floats (`.toolbar-float`, absolute) so entering a table never shifts
+  the page; the editor's `scrollMargin.top` keeps the caret clear of it.
 - The right panel opens only on request (toolbar buttons, Ctrl+Alt+P/C, context menu,
   clicking a comment), never from selection changes; while open, the toolbar's
   Comments/Properties buttons are hidden in favour of the panel's own tabs.

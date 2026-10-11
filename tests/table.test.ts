@@ -50,6 +50,54 @@ describe('tables', () => {
     expect(s).toContain('\\rowcolors{2}{black!4}{}');
     expect(parseTableBlock(s)!.attrs!.style).toBe('striped');
   });
+  it('number-formatted cells keep full precision through round trips', () => {
+    const src = String.raw`\begin{tabular}{lr}
+    \textbf{Grade} & \textbf{PD} \\
+    \hline
+    A & \qnum[pct,d2]{0.0012345}{0.12\%} \\
+    B & \qnum[cur,d0,sep,neg=parens]{-1234.5}{(\$1,235)} \\
+    C & \qnum[sci,d1]{0.000123}{\ensuremath{1.2\times10^{-4}}} \\
+\end{tabular}`;
+    const t = parseTableBlock(src)!;
+    expect(t).toBeTruthy();
+    const body = t.content![0].content!;
+    const a = body[1].content![1];
+    expect(a.attrs).toMatchObject({ format: 'pct,d2', value: '0.0012345' });
+    expect(a.content![0].content).toEqual([{ type: 'text', text: '0.12%' }]);
+    expect(body[2].content![1].content![0].content![0].text).toBe('($1,235)');
+    const out = serializeTableBlock(t);
+    expect(out).toContain(String.raw`\qnum[pct,d2]{0.0012345}{0.12\%}`);
+    expect(out).toContain(String.raw`\qnum[cur,d0,sep,neg=parens]{-1234.5}{(\$1,235)}`);
+    expect(serializeTableBlock(parseTableBlock(out)!)).toBe(out);
+    // more decimals later: the stored value supplies them
+    a.attrs!.format = 'pct,d4';
+    a.content![0].content = [{ type: 'text', text: '0.1235%' }];
+    expect(serializeTableBlock(t)).toContain(String.raw`\qnum[pct,d4]{0.0012345}{0.1235\%}`);
+    // a typed number replaces the value; text in a number cell stays text
+    a.content![0].content = [{ type: 'text', text: '7.5' }];
+    expect(serializeTableBlock(t)).toContain(String.raw`\qnum[pct,d4]{0.075}{7.5000\%}`);
+    a.content![0].content = [{ type: 'text', text: 'n/a' }];
+    expect(serializeTableBlock(t)).toMatch(/A & n\/a \\\\/);
+  });
+  it('hand-edited shown text in the source wins', () => {
+    const t = parseTableBlock('\\begin{tabular}{r}\n\\qnum[num,d1]{2.25}{9.9} \\\\\n\\end{tabular}')!;
+    const cell = t.content![0].content![0].content![0];
+    expect(cell.content![0].content).toEqual([{ type: 'text', text: '9.9' }]);
+    expect(serializeTableBlock(t)).toContain('\\qnum[num,d1]{9.9}{9.9}');
+  });
+  it('styles, header shading and row spacing round-trip', () => {
+    for (const style of ['booktabs', 'striped', 'lines', 'minimal', 'boxed', 'grid', 'plain'] as const) {
+      const t = newTable(3, 3, style, 'tab:x');
+      t.attrs = { ...t.attrs, headerFill: 'E5ECF8', stretch: '1.3', size: 'footnotesize' };
+      const s = serializeTableBlock(t);
+      const back = parseTableBlock(s)!;
+      expect(back.attrs, style).toMatchObject({ style, headerFill: 'E5ECF8', stretch: '1.3', size: 'footnotesize' });
+      expect(serializeTableBlock(back), style).toBe(s);
+    }
+    const boxed = serializeTableBlock(newTable(2, 3, 'boxed', 'tab:b'));
+    expect(boxed).toContain('\\begin{tabular}{|lrr|}');
+    expect(boxed).not.toContain('\\rowcolor'); // no fill requested → none emitted
+  });
   it('falls back to raw for unsupported tables', () => {
     expect(parseTableBlock('\\begin{table}\\begin{tabular}{@{}l@{}}a\\end{tabular}\\end{table}')).toBeNull();
     const doc = parseDocument(`\\documentclass{article}\n\\begin{document}\n${T1}\n\n\\begin{table}\\begin{tabular}{S}1\\end{tabular}\\end{table}\n\\end{document}\n`);

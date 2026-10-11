@@ -6,6 +6,7 @@ import { addThread, deleteMessage, deleteThread, editMessage, me, replyThread, r
 import { editorRef } from '../visual/editorRef';
 import { commentsKey, threadRange } from '../visual/comments';
 import { Check } from './Icons';
+import { isMod } from '../keys';
 
 function when(iso: string) {
   const d = new Date(iso);
@@ -31,7 +32,7 @@ function Composer({ placeholder, onSubmit, onCancel, autoFocus, initial = '', su
   return (
     <div className="col" style={{ gap: 6 }}>
       <textarea ref={ref} className="field" rows={3} placeholder={placeholder} value={t} onChange={(e) => setT(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } if (e.key === 'Escape' && onCancel) { e.preventDefault(); onCancel(); } }} />
+        onKeyDown={(e) => { if (e.key === 'Enter' && isMod(e)) { e.preventDefault(); send(); } if (e.key === 'Escape' && onCancel) { e.preventDefault(); onCancel(); } }} />
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         {onCancel && <button className="btn btn-sm btn-q" onClick={onCancel}>Cancel</button>}
         <button className="btn btn-sm btn-pri" disabled={!t.trim()} onClick={send} title="Ctrl+Enter">{submitLabel}</button>
