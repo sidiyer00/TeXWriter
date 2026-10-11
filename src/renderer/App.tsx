@@ -61,7 +61,7 @@ function onKey(e: KeyboardEvent) {
   if (inField && !(mod && !e.shiftKey && k === 's') && e.key !== 'F8') return;
 
   if (mod && e.key === 'Enter') { stop(); void compileNow(); return; }
-  if (mod && !e.shiftKey && k === 's') { stop(); void saveAll(); return; }
+  if (mod && !e.shiftKey && k === 's') { stop(); void saveAll().then(() => toast('All changes saved.', 'ok')); return; }
   if (mod && !e.shiftKey && !e.altKey && k === 'o') { stop(); setState({ quickOpen: true }); return; }
   if (mod && e.shiftKey && k === 't') { stop(); void runTests(); return; }
   if (mod && !e.shiftKey && !e.altKey && ['1', '2', '3'].includes(e.key)) { stop(); setState({ view: 'editor', mode: e.key === '1' ? 'visual' : e.key === '2' ? 'split' : 'source' }); return; }
