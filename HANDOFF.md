@@ -5,8 +5,8 @@ Moving from Cowork to Claude Code. Project conventions and gotchas: `CLAUDE.md`.
 ## Where things are
 - Repo: `C:\Users\sidiy\Documents\Projects\Latex_Editor\quire` (git, branch `master`,
   HEAD = "v0.2: …" on top of "Quire 0.1.0"). No remote configured.
-- Installer: `release\Quire-Setup-0.2.1.exe`
-  (sha256 `46f1ed1d4f25234fc702f2262ebff2b321f6cd3eb95cf497018302119535b44a`, unsigned). 0.2.0 and 0.1.0 installers also there.
+- Installer: `release\Quire-Setup-0.2.2.exe`
+  (sha256 `2aaa01ab35f1f29ba4618bd47231f748a606b7c2822475519278d720e4aef0a0`, unsigned). Older installers also there.
 - 0.2.1 = 0.2.0 + Windows fixes: menus no longer clipped, click-only submenus, right panel opens
   only on request, Projects-folder setting (keeps files out of OneDrive), no desktop shortcut.
 - `node_modules/` is not in the folder: run `npm install` first.
@@ -29,7 +29,7 @@ Moving from Cowork to Claude Code. Project conventions and gotchas: `CLAUDE.md`.
    re-check, Settings → Detect again) · Settings page incl. read-only shortcuts (F1) ·
    context menus · error boundary · fixed a compile-breaking support-macro bug.
 
-## Unreleased (after 0.2.1)
+## 0.2.2
 - Tables: 7 styles (+ Horizontal lines, Boxed), text size, row spacing (\arraystretch),
   header shading, wrap-at-width columns; Excel-style number formats per cell (Integer,
   Number, Percentage, Currency $/€/£/¥, Scientific; decimals or significant figures;
