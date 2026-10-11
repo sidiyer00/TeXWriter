@@ -53,6 +53,29 @@ const optional = (pkg: string, opts = '') => `\\IfFileExists{${pkg}.sty}{\\usepa
 const hex = (s: string) => s.replace(/^#/, '').toUpperCase().padEnd(6, '0').slice(0, 6);
 const tex = (s: string) => s.replace(/([%&#_$])/g, '\\$1');
 
+/** Version of the support macros below; bump when they change so projects are migrated. */
+export const SUPPORT_VERSION = 'quire-support-v3';
+
+/** Macros the visual editor emits (highlights, merged table cells). Safe to load twice. */
+/**
+ * Macros for features the visual editor emits. Definitions with #-parameters stay out of
+ * \IfFileExists branches: older LaTeX kernels store the branch with \def, where a single
+ * # is an error ("Illegal parameter number in definition of \reserved@a").
+ */
+export const SUPPORT_MACROS = [
+  `% ${SUPPORT_VERSION}: macros used by the visual editor`,
+  '\\IfFileExists{soul.sty}{\\usepackage{soul}\\def\\quiresoulok{}}{}',
+  '\\IfFileExists{multirow.sty}{\\usepackage{multirow}}{}',
+  '\\usepackage{colortbl}',
+  '\\ifx\\quiresoulok\\undefined',
+  '  \\providecommand{\\quirehl}[2]{\\colorbox[HTML]{#1}{#2}}',
+  '\\else',
+  '  \\providecommand{\\quirehl}[2]{{\\definecolor{quirehlc}{HTML}{#1}\\sethlcolor{quirehlc}\\hl{#2}}}',
+  '\\fi',
+  '\\ifx\\multirow\\undefined\\providecommand{\\multirow}[3]{#3}\\fi',
+  '\\ifx\\rowcolors\\undefined\\providecommand{\\rowcolors}[3]{}\\fi',
+];
+
 export function themeBlock(t: ThemeSettings): string {
   const m = t.margins;
   const side = t.twoSide ? `inner=${m.inner},outer=${m.outer}` : `left=${m.inner},right=${m.outer}`;
@@ -71,6 +94,7 @@ export function themeBlock(t: ThemeSettings): string {
     '\\hypersetup{colorlinks=true,linkcolor=quirelink,citecolor=quirelink,urlcolor=quirelink}',
     `\\newcommand{\\quireheadleft}{${tex(t.headerLeft)}}`,
     `\\newcommand{\\quireheadright}{${tex(t.headerRight)}}`,
+    ...SUPPORT_MACROS,
     THEME_END,
   ];
   return L.filter(Boolean).join('\n');

@@ -1,4 +1,5 @@
 // Export the compiled PDF, a reproducible source bundle and a provenance manifest.
+import { app } from 'electron';
 import fsp from 'node:fs/promises';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,7 +37,7 @@ export async function provenance(root: string, m: ProjectManifest) {
   const tc = toolchain();
   const pdf = pdfPath(root, m);
   return {
-    generator: 'Quire 0.1.0',
+    generator: `Quire ${app.getVersion()}`,
     exportedAt: new Date().toISOString(),
     project: { name: m.name, modelId: m.modelId, reportType: m.reportType, mainFile: m.mainFile, engine: m.engine },
     pdf: fs.existsSync(pdf) ? { file: path.basename(pdf), sha256: await sha256(pdf), pages: state.lastCompile?.pages ?? null, compiledAt: state.lastCompile?.startedAt ?? null } : null,

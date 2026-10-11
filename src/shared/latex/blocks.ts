@@ -6,6 +6,7 @@
 // canonical serialization; on save, untouched blocks emit their original bytes.
 import { JNode, HEADING_COMMANDS, MATH_ENVS, PAGEBREAK_COMMANDS, FRIENDLY_COMMANDS, INLINE_COMMANDS } from './model';
 import { CommentInInline, parseInline, serializeInline, wrap } from './inline';
+import { parseTableBlock, serializeTableBlock } from './table';
 import { findEnvEnd, matchGroup, readArgs, readCommand, skipArgWs, skipInlineWs, lineOf } from './scan';
 
 export interface ParsedBlock { node: JNode; from: number; to: number }
@@ -302,6 +303,7 @@ export function parseBody(body: string): { leading: string; blocks: ParsedBlock[
       else if (env === 'figure' || env === 'figure*') node = parseFigure(src, env);
       else if (env === 'quirecallout') node = parseCallout(src);
       else if (env === 'lstlisting' || env === 'verbatim') node = parseCode(src, env);
+      else if (env === 'table' || env === 'table*' || env === 'tabular') node = parseTableBlock(src);
       if (!node) node = raw(src);
       // trailing text on the same line as \end{...}? then whole thing raw to line end
       const le = body.indexOf('\n', end);
@@ -469,6 +471,8 @@ export function canonicalBlock(node: JNode, pad = ''): string {
     }
     case 'pageBreak':
       return `\\${a.cmd || 'clearpage'}`;
+    case 'tableBlock':
+      return serializeTableBlock(node);
     case 'rawBlock':
       return a.latex ?? '';
     default:

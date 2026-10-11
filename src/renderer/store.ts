@@ -2,7 +2,7 @@
 // React components, the TipTap editor and CodeMirror in step without a framework.
 import { useSyncExternalStore } from 'react';
 import type {
-  CompileResult, Diagnostic, GeneratedBlockConfig, OpenProject, ProjectManifest, RunMeta, RunRecord, ToolchainInfo, ThemeSettings,
+  AppSettings, CommentThread, CompileResult, Diagnostic, GeneratedBlockConfig, OpenProject, ProjectManifest, RunMeta, RunRecord, SpellInfo, ToolchainInfo, ThemeSettings,
 } from '../shared/types';
 import { parseDocument, toDocJson, serializeDocument, blockLines, ParsedDocument } from '../shared/latex/blocks';
 import { parseBib, BibEntry, numberDocument, LabelInfo, OutlineItem } from '../shared/latex/refs';
@@ -11,11 +11,11 @@ import { renderTable, renderSummary, renderFigure, BlockView, blockStatus } from
 import { hash } from '../shared/latex/scan';
 import { closest } from '../shared/latex/log';
 import type { JNode } from '../shared/latex/model';
-import { applyThemeToClass, applyThemeToPreamble } from '../shared/latex/theme';
+import { applyThemeToClass, applyThemeToPreamble, SUPPORT_MACROS, SUPPORT_VERSION, THEME_BEGIN } from '../shared/latex/theme';
 
 export const api = window.quire;
 
-export type View = 'home' | 'editor' | 'tests' | 'review' | 'setup';
+export type View = 'home' | 'editor' | 'tests' | 'review' | 'setup' | 'settings';
 export type Mode = 'visual' | 'split' | 'source';
 export type Origin = 'visual' | 'source' | 'disk' | 'app';
 
@@ -36,7 +36,7 @@ export interface State {
   view: View;
   mode: Mode;
   navOpen: boolean;
-  navTab: 'outline' | 'assets' | 'tests' | 'refs';
+  navTab: 'outline' | 'files' | 'tests' | 'refs';
   toolchain: ToolchainInfo | null;
   project: OpenProject | null;
   files: Record<string, FileState>;
@@ -68,6 +68,36 @@ export interface State {
   /** parsed block index after which "Insert test result" puts new content */
   insertAfter: number | null;
   pdfJump: { page: number; y?: number; nonce: number } | null;
+  settings: AppSettings | null;
+  /** files open as tabs in the source pane (main file is always first) */
+  openTabs: string[];
+  /** right-hand panel: open state, active tab, and whether it was opened automatically */
+  panel: { open: boolean; tab: 'properties' | 'comments'; auto: boolean };
+  find: { replace: boolean; nonce: number } | null;
+  comments: CommentThread[];
+  activeComment: string | null;
+  /** a new comment being written for the current selection */
+  draftComment: { quote: string; prefix: string; suffix: string; from: number; to: number } | null;
+  contextMenu: { x: number; y: number; items: MenuItem[] } | null;
+  spell: SpellInfo | null;
+  quickOpen: boolean;
+  equationModal: { pos: number; inline: boolean } | null;
+  dialog: 'insertTable' | 'shortcuts' | 'about' | null;
+  prompt: { title: string; label: string; value: string; resolve: (v: string | null) => void } | null;
+  picker: 'cite' | 'ref' | null;
+  /** bumps when the visual editor instance changes */
+  editorTick: number;
+}
+
+export interface MenuItem {
+  label?: string;
+  shortcut?: string;
+  run?: () => void;
+  disabled?: boolean;
+  checked?: boolean;
+  separator?: boolean;
+  submenu?: MenuItem[];
+  danger?: boolean;
 }
 
 const initial: State = {
@@ -75,6 +105,8 @@ const initial: State = {
   runs: [], runCache: {}, running: null, compiling: null, lastCompile: null, pdfVersion: 0, selection: null, sourceLine: null, syncLines: null, syncIndex: null,
   bib: [], labels: new Map(), outline: [], numbers: new Map(), renders: {}, externalChange: null, toast: null,
   selectedRun: null, selectedTest: null, reviewPage: 1, reviewIssue: null, jump: null, pdfJump: null, insertAfter: null,
+  settings: null, openTabs: [], panel: { open: false, tab: 'properties', auto: true }, find: null, comments: [], activeComment: null, draftComment: null,
+  contextMenu: null, spell: null, quickOpen: false, equationModal: null, dialog: null, prompt: null, picker: null, editorTick: 0,
 };
 
 let state: State = initial;
@@ -86,6 +118,9 @@ export function setState(patch: Partial<State> | ((s: State) => Partial<State>))
   state = { ...state, ...p };
   listeners.forEach((l) => l());
 }
+// read-only hook for automated UI tests and debugging from DevTools
+(window as unknown as { __quireState: () => State }).__quireState = () => state;
+
 export function subscribe(l: () => void) { listeners.add(l); return () => { listeners.delete(l); }; }
 export function useStore<T>(sel: (s: State) => T): T {
   return useSyncExternalStore(subscribe, () => sel(state));
@@ -127,6 +162,7 @@ export let flushHook: () => void = () => {};
 export function setFlushHook(f: () => void) { flushHook = f; }
 
 export function setFileText(rel: string, text: string, origin: Origin) {
+  if (rel === mainFile() && origin !== 'source' && origin !== 'disk') text = ensureSupportInMain(text);
   const f = state.files[rel];
   if (f && f.text === text) return;
   setState((s) => ({ files: { ...s.files, [rel]: { text, saved: f?.saved ?? '', origin, version: (f?.version ?? 0) + 1 } } }));
@@ -149,6 +185,28 @@ export async function saveAll() {
   for (const rel of dirtyFiles()) await saveFile(rel);
 }
 
+/** Open a file in the source pane as a tab (loading it if needed). */
+export async function openTab(rel: string, line?: number) {
+  const text = await guard(() => openFile(rel), `Cannot open ${rel}`);
+  if (text === undefined) return;
+  setState((s) => ({
+    openTabs: s.openTabs.includes(rel) ? s.openTabs : [...s.openTabs, rel],
+    sourceFile: rel,
+    view: 'editor',
+    mode: s.mode === 'visual' ? 'split' : s.mode,
+    jump: line ? { file: rel, line, nonce: Date.now() } : s.jump,
+  }));
+}
+
+export function closeTab(rel: string) {
+  if (rel === mainFile()) return;
+  void saveFile(rel);
+  setState((s) => {
+    const tabs = s.openTabs.filter((t) => t !== rel);
+    return { openTabs: tabs, sourceFile: s.sourceFile === rel ? tabs[tabs.length - 1] ?? mainFile() : s.sourceFile };
+  });
+}
+
 export async function openFile(rel: string): Promise<string> {
   if (state.files[rel]) return state.files[rel].text;
   const text = await api.readText(root(), rel);
@@ -160,6 +218,7 @@ export async function openFile(rel: string): Promise<string> {
 async function onDiskChange(rel: string) {
   const f = state.files[rel];
   if (rel === 'quire.json') return;
+  if (rel === COMMENTS_FILE) { void loadComments(); return; }
   if (!f) { void refreshFileList(); return; }
   let disk: string;
   try { disk = await api.readText(root(), rel); } catch { return; }
@@ -205,7 +264,7 @@ export function derive() {
 let unsubs: (() => void)[] = [];
 
 export async function loadToolchain() {
-  const tc = await guard(() => api.toolchain());
+  const tc = await guard(() => api.redetectTools());
   if (tc) setState({ toolchain: tc });
 }
 
@@ -215,13 +274,15 @@ export async function openProject(rootDir: string) {
   unsubs.forEach((u) => u());
   unsubs = [];
   parsedCache = null;
-  setState({ ...initial, toolchain: state.toolchain, project: p, runs: p.runs, view: 'editor', sourceFile: p.manifest.mainFile, lastCompile: null, pdfVersion: 1 });
+  setState({ ...initial, toolchain: state.toolchain, settings: state.settings, project: p, runs: p.runs, view: 'editor', sourceFile: p.manifest.mainFile, openTabs: [p.manifest.mainFile], lastCompile: null, pdfVersion: 1 });
   const m = p.manifest;
   await guard(async () => {
     await openFile(m.mainFile);
     for (const f of p.files) if (f.kind === 'bib') await openFile(f.path);
   }, 'Could not read project files');
+  await migrateSupportMacros();
   derive();
+  await loadComments();
   await loadRunsCache();
   await renderAllBlocks();
   void api.watchProject(p.root);
@@ -240,7 +301,7 @@ export function closeProject() {
   unsubs.forEach((u) => u());
   unsubs = [];
   void saveAll();
-  setState({ ...initial, toolchain: state.toolchain, view: 'home' });
+  setState({ ...initial, toolchain: state.toolchain, settings: state.settings, view: 'home' });
 }
 
 export async function saveManifest(m: ProjectManifest) {
@@ -504,7 +565,7 @@ export function gotoSource(file: string | undefined, line: number | undefined) {
   const f = file.replace(/^\.\//, '');
   void (async () => {
     try { await openFile(f); } catch { toast(`Cannot open ${f}`, 'err'); return; }
-    setState((s) => ({ view: 'editor', mode: s.mode === 'visual' ? 'split' : s.mode, sourceFile: f, jump: { file: f, line, nonce: Date.now() } }));
+    setState((s) => ({ view: 'editor', mode: s.mode === 'visual' ? 'split' : s.mode, sourceFile: f, openTabs: s.openTabs.includes(f) ? s.openTabs : [...s.openTabs, f], jump: { file: f, line, nonce: Date.now() } }));
   })();
 }
 
@@ -520,4 +581,166 @@ export async function applyTheme(theme: ThemeSettings) {
   setFileText(m.mainFile, applyThemeToClass(mainText(), theme), 'app');
   await saveManifest({ ...m, theme });
   await saveAll();
+}
+
+
+// ------------------------------------------------------------------ settings & support macros
+
+export async function loadSettings() {
+  const st = await guard(() => api.getSettings());
+  if (st) setState({ settings: st });
+}
+
+export async function updateSettings(patch: Partial<AppSettings>) {
+  const st = await guard(() => api.saveSettings(patch), 'Could not save settings');
+  if (st) setState({ settings: st });
+  if (patch.texBinDir !== undefined || patch.pythonPath !== undefined) await loadToolchain();
+}
+
+/** Projects created by older versions lack the macros newer editor features emit. */
+async function migrateSupportMacros() {
+  if (!state.project) return;
+  const pre = state.project.files.find((f) => f.path === 'preamble.tex');
+  if (!pre) return;
+  const text = await openFile('preamble.tex');
+  if (text.includes(THEME_BEGIN) && !text.includes(SUPPORT_VERSION)) {
+    setFileText('preamble.tex', applyThemeToPreamble(text, manifest().theme), 'app');
+    await saveFile('preamble.tex');
+  }
+}
+
+/** Main file emits \quirehl / \multirow but has no Quire preamble: add a small support block. */
+export function ensureSupportInMain(tex: string): string {
+  if (!/\\quirehl\{|\\multirow\{/.test(tex)) return tex;
+  const pre = state.project?.files.some((f) => f.path === 'preamble.tex') && /\\input\{preamble(\.tex)?\}/.test(tex);
+  if (pre || tex.includes('quire:support begin') || /\\(newcommand|providecommand)\{?\\quirehl/.test(tex)) return tex;
+  const at = tex.search(/\\begin\{document\}/);
+  if (at < 0) return tex;
+  const block = [
+    '% quire:support begin — macros used by the visual editor',
+    '\\usepackage{xcolor}',
+    ...SUPPORT_MACROS,
+    '% quire:support end',
+    '',
+  ].join('\n');
+  return tex.slice(0, at) + block + tex.slice(at);
+}
+
+// ------------------------------------------------------------------ comments
+
+export const COMMENTS_FILE = 'quire-comments.json';
+let commentsSaveTimer = 0;
+
+export async function loadComments() {
+  if (!state.project) return;
+  try {
+    const raw = JSON.parse(await api.readText(root(), COMMENTS_FILE));
+    setState({ comments: Array.isArray(raw?.threads) ? raw.threads : [] });
+  } catch { setState({ comments: [] }); }
+}
+
+function persistComments() {
+  window.clearTimeout(commentsSaveTimer);
+  commentsSaveTimer = window.setTimeout(() => {
+    void guard(() => api.writeText(root(), COMMENTS_FILE, JSON.stringify({ version: 1, threads: state.comments }, null, 2) + '\n'), 'Could not save comments');
+  }, 300);
+}
+
+export function me(): string { return state.settings?.userName || 'Author'; }
+const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+
+export function setComments(fn: (t: CommentThread[]) => CommentThread[]) {
+  setState((s) => ({ comments: fn(s.comments) }));
+  persistComments();
+}
+
+export function addThread(anchor: { quote: string; prefix: string; suffix: string }, text: string): string {
+  const id = uid();
+  const now = new Date().toISOString();
+  setComments((t) => [...t, { id, file: mainFile(), anchor, createdAt: now, author: me(), resolved: false, messages: [{ id: uid(), author: me(), at: now, text }] }]);
+  setState({ activeComment: id, draftComment: null });
+  return id;
+}
+
+export function replyThread(id: string, text: string) {
+  setComments((ts) => ts.map((t) => (t.id === id ? { ...t, resolved: false, messages: [...t.messages, { id: uid(), author: me(), at: new Date().toISOString(), text }] } : t)));
+}
+
+export function editMessage(threadId: string, msgId: string, text: string) {
+  setComments((ts) => ts.map((t) => (t.id === threadId ? { ...t, messages: t.messages.map((m) => (m.id === msgId ? { ...m, text, editedAt: new Date().toISOString() } : m)) } : t)));
+}
+
+export function deleteMessage(threadId: string, msgId: string) {
+  setComments((ts) => ts.flatMap((t) => {
+    if (t.id !== threadId) return [t];
+    const msgs = t.messages.filter((m) => m.id !== msgId);
+    return msgs.length ? [{ ...t, messages: msgs }] : [];
+  }));
+}
+
+export function deleteThread(id: string) { setComments((ts) => ts.filter((t) => t.id !== id)); }
+
+export function resolveThread(id: string, resolved: boolean) {
+  setComments((ts) => ts.map((t) => (t.id === id ? { ...t, resolved, resolvedBy: resolved ? me() : undefined, resolvedAt: resolved ? new Date().toISOString() : undefined } : t)));
+}
+
+/** Keep anchors current as the commented text is edited (called by the editor plugin). */
+export function updateAnchorQuotes(updates: { id: string; quote: string; prefix: string; suffix: string }[]) {
+  if (!updates.length) return;
+  const map = new Map(updates.map((u) => [u.id, u]));
+  setComments((ts) => ts.map((t) => { const u = map.get(t.id); return u && u.quote ? { ...t, anchor: { quote: u.quote, prefix: u.prefix, suffix: u.suffix } } : t; }));
+}
+
+// ------------------------------------------------------------------ panel & menus
+
+const RICH = new Set(['mathBlock', 'generatedBlock', 'figureBlock', 'tableBlock', 'rawBlock']);
+export function isRichSelection(sel: Selection | null, inTable: boolean): boolean {
+  if (inTable) return true;
+  if (!sel) return false;
+  if (sel.inline) return sel.inline.type === 'inlineMath' || sel.inline.type === 'citation' || sel.inline.type === 'crossRef' || sel.inline.type === 'footnote';
+  return RICH.has(sel.type);
+}
+
+export function togglePanel(tab?: 'properties' | 'comments') {
+  setState((s) => {
+    if (tab && s.panel.open && s.panel.tab !== tab) return { panel: { open: true, tab, auto: false } };
+    return { panel: { open: !s.panel.open, tab: tab ?? s.panel.tab, auto: false } };
+  });
+}
+
+/**
+ * Open the panel automatically for equations, tables and figures; close it again when
+ * leaving them. Deferred until the mouse is released and the selection has settled, so
+ * the page never shifts between the two clicks of a double-click.
+ */
+let autoTimer = 0;
+let autoRich = false;
+let mouseDown = false;
+window.addEventListener('pointerdown', () => { mouseDown = true; }, true);
+window.addEventListener('pointerup', () => { mouseDown = false; }, true);
+function applyAutoPanel() {
+  if (mouseDown) { autoTimer = window.setTimeout(applyAutoPanel, 150); return; }
+  const p = state.panel;
+  const rich = autoRich;
+  if (rich && !p.open) setState({ panel: { open: true, tab: 'properties', auto: true } });
+  else if (rich && p.open && p.auto && p.tab !== 'properties') setState({ panel: { ...p, tab: 'properties' } });
+  else if (!rich && p.open && p.auto && p.tab === 'properties') setState({ panel: { ...p, open: false } });
+}
+export function autoPanel(rich: boolean) {
+  autoRich = rich;
+  window.clearTimeout(autoTimer);
+  autoTimer = window.setTimeout(applyAutoPanel, 350);
+}
+
+/**
+ * Show our context menu. The DOM event is not cancelled, so Electron still reports the
+ * spell-checker's suggestions for the word under the cursor (merged in by ContextMenu).
+ */
+export function openContextMenu(e: { clientX: number; clientY: number }, items: MenuItem[]) {
+  setState({ contextMenu: { x: e.clientX, y: e.clientY, items }, spell: null });
+}
+
+/** In-app replacement for window.prompt (which Electron does not support). */
+export function promptText(title: string, label: string, value = ''): Promise<string | null> {
+  return new Promise((resolve) => setState({ prompt: { title, label, value, resolve: (v) => { setState({ prompt: null }); resolve(v); } } }));
 }

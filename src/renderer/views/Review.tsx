@@ -4,7 +4,7 @@ import type { Diagnostic, SyncTexForward } from '../../shared/types';
 import { allDiagnostics, api, compileNow, gotoSource, guard, mainFile, refreshBlock, renderAllBlocks, replaceKey, restoreBlock, setState, toast, updateBlockConfig, useStore, getState } from '../store';
 import { BackButton, CompileButton, TitleBar } from '../components/Chrome';
 import { Check, Download, Left, Right, Warn, X } from '../components/Icons';
-import { loadPdf, renderPage, type PDFDocumentProxy } from '../pdf';
+import { loadPdf, pageLinks, renderPage, type PDFDocumentProxy, type PdfLink } from '../pdf';
 
 const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
@@ -29,7 +29,8 @@ function Thumb({ doc, n, active, badge, onClick }: { doc: PDFDocumentProxy; n: n
 
 interface Mark { diag: Diagnostic; num: number; pos?: SyncTexForward }
 
-function Page({ doc, n, scale, marks, onSelectMark, onDblClick, flash }: { doc: PDFDocumentProxy; n: number; scale: number; marks: Mark[]; onSelectMark: (d: Diagnostic) => void; onDblClick: (n: number, x: number, y: number) => void; flash?: { y: number; nonce: number } | null }) {
+function Page({ doc, n, scale, marks, onSelectMark, onDblClick, flash, onGoto }: { doc: PDFDocumentProxy; n: number; scale: number; marks: Mark[]; onSelectMark: (d: Diagnostic) => void; onDblClick: (n: number, x: number, y: number) => void; flash?: { y: number; nonce: number } | null; onGoto: (page: number, y?: number) => void }) {
+  const [links, setLinks] = useState<PdfLink[]>([]);
   const ref = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const [visible, setVisible] = useState(n <= 2);
@@ -45,11 +46,18 @@ function Page({ doc, n, scale, marks, onSelectMark, onDblClick, flash }: { doc: 
     return () => io.disconnect();
   }, []);
   useEffect(() => { if (visible && ref.current) void renderPage(doc, n, ref.current, scale); }, [doc, n, scale, visible]);
+  useEffect(() => { if (visible) void pageLinks(doc, n, scale).then(setLinks).catch(() => setLinks([])); }, [doc, n, scale, visible]);
   return (
     <div ref={wrap} className="pdf-page" data-page={n} style={size ? { width: size.w, height: size.h } : { width: 612 * scale, height: 792 * scale }}
       onDoubleClick={(e) => { const r = (e.currentTarget as HTMLDivElement).getBoundingClientRect(); onDblClick(n, (e.clientX - r.left) / scale, (e.clientY - r.top) / scale); }}
       title="Double-click to jump to the source">
       <canvas ref={ref} />
+      {links.map((l, i) => (
+        <a key={i} className="pdf-link" href={l.url ?? '#'} style={{ left: l.rect[0], top: l.rect[1], width: l.rect[2], height: l.rect[3] }}
+          title={l.url ? `${l.url} — click to open in your browser` : `Go to page ${l.page}`} aria-label={l.url ? `Link to ${l.url}` : `Go to page ${l.page}`}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (l.url) void api.openExternal(l.url); else if (l.page) onGoto(l.page, l.y); }} />
+      ))}
       {marks.map((m) => (
         <button key={m.diag.id} className={`pdf-mark ${m.diag.severity === 'error' ? 'e' : ''}`} style={{ left: m.pos ? Math.min((m.pos.x + (m.pos.width ?? 0)) * scale + 6, (size?.w ?? 600) - 24) : (size?.w ?? 600) - 28, top: m.pos ? Math.max(4, (m.pos.y - (m.pos.height ?? 10)) * scale - 4) : 8 + (m.num - 1) * 24 }}
           onClick={(e) => { e.stopPropagation(); onSelectMark(m.diag); }} aria-label={`Issue ${m.num}: ${m.diag.message}`} title={m.diag.message}>{m.num}</button>
@@ -213,7 +221,7 @@ export function ReviewScreen() {
             {doc && (
               <div className="pdf-pages">
                 {Array.from({ length: pages }, (_, i) => i + 1).map((n) => (
-                  <Page key={`${pdfVersion}-${n}`} doc={doc} n={n} scale={zoom} marks={marks.filter((m) => pageOf(m) === n)} onSelectMark={selectIssue} onDblClick={onDbl} flash={flash && flash.page === n ? flash : null} />
+                  <Page key={`${pdfVersion}-${n}`} doc={doc} n={n} scale={zoom} marks={marks.filter((m) => pageOf(m) === n)} onSelectMark={selectIssue} onDblClick={onDbl} flash={flash && flash.page === n ? flash : null} onGoto={(p, y) => { scrollToPage(p, y); if (y) setFlash({ page: p, y, nonce: Date.now() }); }} />
                 ))}
               </div>
             )}

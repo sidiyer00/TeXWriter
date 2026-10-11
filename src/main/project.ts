@@ -66,11 +66,13 @@ export async function writeState(root: string, s: ProjectState): Promise<void> {
 
 function kindOf(p: string): ProjectFile['kind'] {
   const e = path.extname(p).toLowerCase();
-  if (e === '.tex' || e === '.sty' || e === '.cls') return 'tex';
-  if (e === '.bib') return 'bib';
+  if (['.tex', '.sty', '.cls', '.ltx', '.dtx', '.def', '.cfg', '.clo', '.fd'].includes(e)) return 'tex';
+  if (e === '.bib' || e === '.bst' || e === '.bbx' || e === '.cbx') return 'bib';
   if (['.png', '.jpg', '.jpeg', '.gif', '.svg', '.eps'].includes(e)) return 'image';
   if (e === '.pdf') return 'pdf';
-  if (['.csv', '.json', '.txt', '.tsv', '.xlsx'].includes(e)) return 'data';
+  if (['.csv', '.json', '.tsv', '.xlsx', '.parquet'].includes(e)) return 'data';
+  if (['.py', '.r', '.sql', '.jl', '.m', '.sh', '.ps1', '.ipynb'].includes(e)) return 'code';
+  if (['.txt', '.md', '.yml', '.yaml', '.toml', '.ini', '.gitignore', '.latexmkrc'].includes(e) || p.endsWith('.latexmkrc')) return 'text';
   return 'other';
 }
 

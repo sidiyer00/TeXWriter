@@ -166,7 +166,7 @@ export interface ProjectState {
   lastCompile?: Omit<CompileResult, 'log'> | null;
 }
 
-export interface ProjectFile { path: string; size: number; kind: 'tex' | 'bib' | 'image' | 'pdf' | 'data' | 'other'; generated: boolean }
+export interface ProjectFile { path: string; size: number; kind: 'tex' | 'bib' | 'image' | 'pdf' | 'data' | 'code' | 'text' | 'other'; generated: boolean }
 
 export interface OpenProject {
   root: string;
@@ -205,7 +205,42 @@ export interface ToolchainInfo {
   synctex: string | null;
   python: string | null;
   git: string | null;
+  perl: string | null;
+  /** folder holding pdflatex */
+  texBin: string | null;
+  distribution: 'MiKTeX' | 'TeX Live' | 'TeX' | null;
 }
+
+export interface AppSettings {
+  /** shown on comments you write */
+  userName: string;
+  /** override: folder containing pdflatex/latexmk */
+  texBinDir: string;
+  /** override: python interpreter */
+  pythonPath: string;
+  /** MiKTeX: install missing packages during compile without asking */
+  autoInstallPackages: boolean;
+  spellcheck: boolean;
+  spellLanguage: string;
+  uiZoom: number;
+}
+
+export interface CommentMessage { id: string; author: string; at: string; text: string; editedAt?: string }
+export interface CommentAnchor { quote: string; prefix: string; suffix: string }
+export interface CommentThread {
+  id: string;
+  file: string;
+  anchor: CommentAnchor;
+  createdAt: string;
+  author: string;
+  resolved: boolean;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  messages: CommentMessage[];
+}
+export interface CommentsFile { version: 1; threads: CommentThread[] }
+
+export interface SpellInfo { word: string; suggestions: string[]; at: number }
 
 export interface SyncTexLocation { file: string; line: number; column?: number }
 export interface SyncTexForward { page: number; x: number; y: number; width?: number; height?: number }
@@ -256,6 +291,17 @@ export interface QuireApi {
   exportProvenance(root: string): Promise<string | null>;
   revealInFolder(absPath: string): Promise<void>;
   openExternal(url: string): Promise<void>;
+  openPath(absPath: string): Promise<void>;
+  getSettings(): Promise<AppSettings>;
+  saveSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
+  redetectTools(): Promise<ToolchainInfo>;
+  onWindowFocus(cb: () => void): () => void;
+  onSpell(cb: (s: SpellInfo) => void): () => void;
+  replaceMisspelling(word: string): Promise<void>;
+  addToDictionary(word: string): Promise<void>;
+  editCommand(cmd: 'cut' | 'copy' | 'paste' | 'selectAll' | 'undo' | 'redo'): Promise<void>;
+  setZoom(factor: number): Promise<void>;
+  appInfo(): Promise<{ version: string; electron: string; chrome: string; node: string; userData: string }>;
   /** Main asks the renderer to save before the window closes. */
   onFlush(cb: () => Promise<void> | void): () => void;
 }

@@ -1,6 +1,8 @@
-// Left panel: outline, assets, tests, references.
+// Left panel: outline, project files, tests, references.
 import { useMemo, useState } from 'react';
-import { allDiagnostics, api, gotoSource, guard, mainBlockLines, mainFile, openFile, runTests, setState, useStore, latestRun, getRun, getState } from '../store';
+import { allDiagnostics, api, gotoSource, guard, mainBlockLines, mainFile, openTab, openContextMenu, runTests, setState, useStore, latestRun, getRun, getState } from '../store';
+import type { ProjectFile } from '../../shared/types';
+import { Down, Right, Doc, Folder } from './Icons';
 import { Panel, Play, Search, StatusIcon } from './Icons';
 import { editorRef } from '../visual/editorRef';
 import { scrollToBlock } from '../visual/VisualEditor';
@@ -46,6 +48,97 @@ function insertCitation(key: string) {
   ed.chain().focus().insertContent({ type: 'citation', attrs: { cmd: 'citep', keys: key, opts: '' } }).run();
 }
 
+const EDITABLE = new Set(['tex', 'bib', 'data', 'code', 'text']);
+
+function figureNode(path: string) {
+  return { type: 'figureBlock', attrs: { path, caption: 'Caption.', label: `fig:${path.split('/').pop()!.replace(/\.\w+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, width: '0.8\\linewidth', placement: 'htbp', env: 'figure' } };
+}
+
+interface Dir { name: string; path: string; dirs: Map<string, Dir>; files: ProjectFile[] }
+function buildTree(files: ProjectFile[]): Dir {
+  const root: Dir = { name: '', path: '', dirs: new Map(), files: [] };
+  for (const f of files) {
+    const parts = f.path.split('/');
+    let d = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const p = parts.slice(0, i + 1).join('/');
+      if (!d.dirs.has(parts[i])) d.dirs.set(parts[i], { name: parts[i], path: p, dirs: new Map(), files: [] });
+      d = d.dirs.get(parts[i])!;
+    }
+    d.files.push(f);
+  }
+  return root;
+}
+
+function fileMenu(f: ProjectFile, root: string): import('../store').MenuItem[] {
+  const img = f.kind === 'image' || f.kind === 'pdf';
+  return [
+    ...(EDITABLE.has(f.kind) ? [{ label: 'Open', run: () => void openTab(f.path) }] : []),
+    ...(img ? [{ label: 'Insert as figure', run: () => editorRef.current?.chain().focus().insertContent(figureNode(f.path)).run() }] : []),
+    { label: 'Open with default app', run: () => void api.openPath(`${root}/${f.path}`) },
+    { label: 'Show in folder', run: () => void api.revealInFolder(`${root}/${f.path}`) },
+    { separator: true },
+    { label: 'Copy relative path', run: () => void navigator.clipboard.writeText(f.path) },
+  ];
+}
+
+function FilesTree() {
+  const project = useStore((s) => s.project)!;
+  const current = useStore((s) => s.sourceFile);
+  const [closed, setClosed] = useState<Set<string>>(() => new Set(['runs', 'build', '.quire']));
+  const [q, setQ] = useState('');
+  const visible = project.files.filter((f) => !q || f.path.toLowerCase().includes(q.toLowerCase()));
+  const tree = useMemo(() => buildTree(visible), [visible.map((f) => f.path).join('|')]);
+  const toggle = (p: string) => setClosed((c) => { const n = new Set(c); if (n.has(p)) n.delete(p); else n.add(p); return n; });
+  const open = (f: ProjectFile) => {
+    if (EDITABLE.has(f.kind)) void openTab(f.path);
+    else if (f.kind === 'image' || f.kind === 'pdf') editorRef.current?.chain().focus().insertContent(figureNode(f.path)).run();
+    else void api.openPath(`${project.root}/${f.path}`);
+  };
+  const render = (d: Dir, depth: number): React.ReactNode => (
+    <>
+      {[...d.dirs.values()].sort((a, b) => a.name.localeCompare(b.name)).map((sub) => {
+        const isClosed = !q && closed.has(sub.path);
+        return (
+          <div key={sub.path} role="treeitem" aria-expanded={!isClosed}>
+            <button className="tree ftree" style={{ paddingLeft: 8 + depth * 14 }} onClick={() => toggle(sub.path)}>
+              {isClosed ? <Right size={11} /> : <Down size={11} />}<Folder size={13} /><span className="ftree-name">{sub.name}</span>
+            </button>
+            {!isClosed && render(sub, depth + 1)}
+          </div>
+        );
+      })}
+      {[...d.files].sort((a, b) => a.path.localeCompare(b.path)).map((f) => (
+        <button key={f.path} role="treeitem" className={`tree ftree ${f.path === current ? 'active' : ''}`} style={{ paddingLeft: 22 + depth * 14 }} title={`${f.path}${EDITABLE.has(f.kind) ? ' — click to open' : f.kind === 'image' || f.kind === 'pdf' ? ' — click to insert as a figure' : ''}`}
+          onClick={() => open(f)} onContextMenu={(e) => { e.preventDefault(); openContextMenu(e, fileMenu(f, project.root)); }}>
+          <Doc size={13} />
+          <span className="ftree-name">{f.path.split('/').pop()}</span>
+          {f.generated && <span className="gen-tag">gen</span>}
+          {f.path === mainFile() && <span className="gen-tag" style={{ background: 'var(--accent-soft, #E6ECF8)' }}>main</span>}
+        </button>
+      ))}
+    </>
+  );
+  return (
+    <div className="col" style={{ gap: 4 }} role="tree" aria-label="Project files">
+      <label className="row" style={{ height: 30, padding: '0 8px', border: '1px solid var(--rule)', borderRadius: 6, background: '#fff', color: 'var(--muted-3)', margin: '0 4px 4px' }}>
+        <Search /><input aria-label="Filter files" placeholder="Filter files  (Ctrl+O to open)" value={q} onChange={(e) => setQ(e.target.value)} style={{ border: 0, outline: 'none', flex: 1, background: 'transparent', color: 'var(--ink)', fontSize: 12.5, minWidth: 0 }} />
+      </label>
+      {render(tree, 0)}
+      <div className="row wrap" style={{ gap: 6, padding: '8px 6px' }}>
+        <button className="btn btn-sm" onClick={async () => {
+          const f = await api.chooseFile('Add an image or PDF figure', [{ name: 'Figures', extensions: ['png', 'jpg', 'jpeg', 'pdf'] }]);
+          if (!f) return;
+          const rel = await guard(() => api.importAsset(project.root, f, 'figures'));
+          if (rel) { const p = await api.reloadProject(project.root); setState((s) => ({ project: s.project ? { ...s.project, files: p.files } : s.project })); }
+        }}>Add figure…</button>
+        <button className="btn btn-sm btn-q" onClick={async () => { const p = await api.reloadProject(project.root); setState((s) => ({ project: s.project ? { ...s.project, files: p.files } : s.project })); }}>Refresh</button>
+      </div>
+      <div className="small muted" style={{ padding: '0 8px' }}>Click a .tex, .sty, .cls, .bib or code file to open it in a tab; click an image to insert it as a figure. Right-click for more.</div>
+    </div>
+  );
+}
+
 export function Navigator() {
   const tab = useStore((s) => s.navTab);
   const outline = useStore((s) => s.outline);
@@ -76,7 +169,7 @@ export function Navigator() {
   return (
     <aside className="panel-left" aria-label="Project navigator">
       <div className="tabs" role="tablist" aria-label="Navigator">
-        {(['outline', 'assets', 'tests', 'refs'] as const).map((t) => (
+        {(['outline', 'files', 'tests', 'refs'] as const).map((t) => (
           <button key={t} className="tab" role="tab" aria-selected={tab === t} onClick={() => setState({ navTab: t })}>{t === 'refs' ? 'Refs' : t[0].toUpperCase() + t.slice(1)}</button>
         ))}
         <button className="btn btn-q ib btn-sm" style={{ marginLeft: 'auto' }} aria-label="Collapse panel (Ctrl+\)" title="Collapse  Ctrl+\" onClick={() => setState({ navOpen: false })}><Panel /></button>
@@ -97,35 +190,7 @@ export function Navigator() {
             </div>
           ))
         )}
-        {tab === 'assets' && (
-          <>
-            {(['image', 'pdf', 'tex', 'bib', 'data'] as const).map((kind) => {
-              const files = project.files.filter((f) => f.kind === kind && !(kind === 'pdf' && f.path.startsWith('runs/')));
-              if (!files.length) return null;
-              return (
-                <div key={kind} style={{ marginBottom: 10 }}>
-                  <div className="lbl" style={{ padding: '6px 8px 4px' }}>{{ image: 'Images', pdf: 'PDF figures', tex: 'LaTeX', bib: 'Bibliography', data: 'Data' }[kind]}</div>
-                  {files.map((f) => (
-                    <button key={f.path} className="tree" style={{ fontFamily: 'var(--mono)', fontSize: 12 }} title={f.path}
-                      onClick={async () => {
-                        if (kind === 'tex' || kind === 'bib' || kind === 'data') { await guard(() => openFile(f.path)); setState((s) => ({ sourceFile: f.path, mode: s.mode === 'visual' ? 'split' : s.mode })); }
-                        else editorRef.current?.chain().focus().insertContent({ type: 'figureBlock', attrs: { path: f.path, caption: 'Caption.', label: `fig:${f.path.split('/').pop()!.replace(/\.\w+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, width: '0.8\\linewidth', placement: 'htbp', env: 'figure' } }).run();
-                      }}>
-                      {f.generated && <span className="gen-tag">gen</span>}<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.path}</span>
-                    </button>
-                  ))}
-                </div>
-              );
-            })}
-            <button className="btn btn-sm" style={{ margin: 8, alignSelf: 'flex-start' }} onClick={async () => {
-              const f = await api.chooseFile('Add an image or PDF figure', [{ name: 'Figures', extensions: ['png', 'jpg', 'jpeg', 'pdf'] }]);
-              if (!f) return;
-              const rel = await guard(() => api.importAsset(project.root, f, 'figures'));
-              if (rel) { const p = await api.reloadProject(project.root); setState((s) => ({ project: s.project ? { ...s.project, files: p.files } : s.project })); }
-            }}>Add figure file…</button>
-            <div className="small muted" style={{ padding: '0 8px' }}>Click an image to insert it as a figure; click a .tex or .bib file to open its source.</div>
-          </>
-        )}
+        {tab === 'files' && <FilesTree />}
         {tab === 'tests' && (
           <div className="col" style={{ padding: '0 6px', gap: 10 }}>
             {running && <div className="running-card" role="status"><div className="row"><span className="st run st-sm">Running</span><span className="small">{running.done}/{running.total || '…'}</span></div><div className="small">{running.label}</div><div className={`progress ${running.total ? '' : 'indet'}`}><div style={{ width: `${running.total ? (100 * running.done) / running.total : 30}%` }} /></div></div>}
@@ -160,7 +225,7 @@ export function Navigator() {
                 <span className="mono" style={{ fontSize: 10.5, color: 'var(--muted-3)' }}>{b.key}</span>
               </button>
             ))}
-            {project.files.filter((f) => f.kind === 'bib').map((f) => <button key={f.path} className="btn btn-sm" style={{ margin: '6px 4px', alignSelf: 'flex-start' }} onClick={async () => { await openFile(f.path); setState((s) => ({ sourceFile: f.path, mode: s.mode === 'visual' ? 'split' : s.mode })); }}>Edit {f.path}</button>)}
+            {project.files.filter((f) => f.kind === 'bib').map((f) => <button key={f.path} className="btn btn-sm" style={{ margin: '6px 4px', alignSelf: 'flex-start' }} onClick={() => void openTab(f.path)}>Edit {f.path}</button>)}
           </div>
         )}
       </div>

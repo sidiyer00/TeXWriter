@@ -1,7 +1,8 @@
 // The editor document model. It is deliberately ProseMirror-JSON compatible so the
 // renderer can hand it straight to TipTap, and pure so it can be unit tested in Node.
 
-export interface Mark { type: 'bold' | 'italic' | 'code'; attrs?: Record<string, unknown> }
+export type MarkType = 'link' | 'bold' | 'italic' | 'underline' | 'code' | 'textColor' | 'highlight';
+export interface Mark { type: MarkType; attrs?: Record<string, unknown> }
 
 export interface JNode {
   type: string;
@@ -33,12 +34,13 @@ export const BLOCK_TYPES = [
   'codeBlock',
   'pageBreak',
   'rawBlock',
+  'tableBlock',
 ] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];
 
 export const INLINE_COMMANDS = new Set([
-  'textbf', 'textit', 'emph', 'texttt', 'textsc', 'textrm', 'textsf', 'underline',
+  'textbf', 'textit', 'emph', 'texttt', 'textsc', 'textrm', 'textsf', 'underline', 'uline', 'textcolor', 'quirehl',
   'cite', 'citep', 'citet', 'citealp', 'citeauthor', 'citeyear', 'parencite', 'textcite', 'autocite',
   'ref', 'eqref', 'autoref', 'cref', 'Cref', 'pageref', 'nameref',
   'footnote', 'url', 'href', 'ldots', 'dots', 'LaTeX', 'TeX', 'today', 'S', 'P',

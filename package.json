@@ -1,7 +1,7 @@
 {
   "name": "quire",
   "productName": "Quire",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Model documentation and validation report studio: visual editing with live LaTeX control, linked test results, and reproducible PDF builds.",
   "author": "Sid Iyer",
   "license": "UNLICENSED",
@@ -23,6 +23,7 @@
     "adm-zip": "0.5.16"
   },
   "devDependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.8.0",
     "@codemirror/language": "^6.11.0",
     "@codemirror/legacy-modes": "^6.5.0",
@@ -34,7 +35,9 @@
     "@fontsource/source-serif-4": "^5.3.1",
     "@lezer/highlight": "^1.2.5",
     "@tiptap/core": "^3.4.0",
+    "@tiptap/extension-code-block-lowlight": "^3.31.4",
     "@tiptap/extension-placeholder": "^3.4.0",
+    "@tiptap/extension-table": "^3.31.4",
     "@tiptap/pm": "^3.4.0",
     "@tiptap/react": "^3.4.0",
     "@tiptap/starter-kit": "^3.4.0",
@@ -47,6 +50,7 @@
     "electron-builder": "^26.0.12",
     "esbuild": "^0.25.10",
     "katex": "^0.16.22",
+    "lowlight": "^3.3.0",
     "pdfjs-dist": "^5.4.0",
     "playwright-core": "^1.55.0",
     "react": "^19.1.0",

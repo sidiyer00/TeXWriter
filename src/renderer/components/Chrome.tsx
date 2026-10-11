@@ -6,6 +6,7 @@ import { editorRef } from '../visual/editorRef';
 import { sourceViewRef } from './SourceEditor';
 import { undo, redo } from '@codemirror/commands';
 import { hash } from '../../shared/latex/scan';
+import { MenuBar } from './Menu';
 
 export function useOutside(ref: React.RefObject<HTMLElement | null>, onOut: () => void) {
   useEffect(() => {
@@ -89,7 +90,7 @@ export function UndoRedo() {
     }
   };
   return (
-    <div className="row no-drag" style={{ gap: 2 }}>
+    <div className="row no-drag undoredo" style={{ gap: 2 }}>
       <button className="btn btn-q ib" aria-label="Undo (Ctrl+Z)" title="Undo  Ctrl+Z" onClick={() => act('undo')}><Undo /></button>
       <button className="btn btn-q ib" aria-label="Redo (Ctrl+Y)" title="Redo  Ctrl+Y" onClick={() => act('redo')}><Redo /></button>
     </div>
@@ -102,6 +103,7 @@ export function TitleBar({ crumb, center, right }: { crumb?: ReactNode; center?:
   return (
     <header className={`titlebar ${mac ? 'mac' : ''}`}>
       <button className="logo no-drag" aria-label="Quire home" onClick={() => closeProject()}>Q</button>
+      <MenuBar />
       <nav className="crumbs" aria-label="Breadcrumb">
         {project ? (
           <>
@@ -127,7 +129,7 @@ export function RunTestsButton() {
   const running = useStore((s) => s.running);
   const project = useStore((s) => s.project);
   if (!project?.manifest.tests.command) return <button className="btn no-drag" onClick={() => setState({ view: 'setup' })} title="No test command configured">Set up tests</button>;
-  return <button className="btn no-drag" disabled={!!running} onClick={() => void runTests()} title="Run test suite (Ctrl+Shift+T)"><Play />{running ? `Running ${running.done}/${running.total || '…'}` : 'Run tests'}</button>;
+  return <button className="btn no-drag" disabled={!!running} onClick={() => void runTests()} title="Run test suite (Ctrl+Shift+T)" aria-label={running ? undefined : 'Run tests'}><Play /><span className={running ? '' : 'tlabel'}>{running ? `Running ${running.done}/${running.total || '…'}` : 'Run tests'}</span></button>;
 }
 
 export function StatusBar({ children }: { children?: ReactNode }) {

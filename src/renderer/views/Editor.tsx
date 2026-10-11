@@ -1,13 +1,15 @@
 // Document editor: visual, split and LaTeX modes around the shared source of truth.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
 import { VisualEditor } from '../visual/VisualEditor';
-import { editorRef } from '../visual/editorRef';
 import { SourceEditor } from '../components/SourceEditor';
-import { Navigator, parsedIndexForEditor } from '../components/Navigator';
+import { Navigator } from '../components/Navigator';
 import { Properties } from '../components/Properties';
-import { CompileButton, ExportMenu, RunTestsButton, StatusBar, TitleBar, useOutside } from '../components/Chrome';
-import { api, getState, guard, mainFile, openFile, resolveExternal, restoreBlock, setState, unlinkBlock, useStore } from '../store';
-import { Gear, List, OList, Panel } from '../components/Icons';
+import { CommentsPanel } from '../components/CommentsPanel';
+import { FormatToolbar } from '../components/Toolbar';
+import { FindBar } from '../components/FindBar';
+import { CompileButton, ExportMenu, RunTestsButton, StatusBar, TitleBar } from '../components/Chrome';
+import { api, closeTab, getState, guard, mainFile, openContextMenu, openFile, resolveExternal, restoreBlock, setState, unlinkBlock, useStore } from '../store';
+import { Gear, Panel, X } from '../components/Icons';
 
 function ModeSwitch() {
   const mode = useStore((s) => s.mode);
@@ -20,121 +22,16 @@ function ModeSwitch() {
   );
 }
 
-function Picker({ label, items, onPick, empty }: { label: string; items: { key: string; text: string; sub?: string }[]; onPick: (k: string) => void; empty: string }) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState('');
-  const [hi, setHi] = useState(0);
-  const ref = useRef<HTMLDivElement>(null);
-  useOutside(ref, () => setOpen(false));
-  const shown = items.filter((i) => !q || `${i.key} ${i.text} ${i.sub ?? ''}`.toLowerCase().includes(q.toLowerCase())).slice(0, 60);
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button className="tb" aria-haspopup="listbox" aria-expanded={open} onMouseDown={(e) => e.preventDefault()} onClick={() => { setOpen(!open); setQ(''); setHi(0); }}>{label}</button>
-      {open && (
-        <div className="menu" style={{ top: 32, left: 0, width: 320 }}>
-          <input className="field" autoFocus placeholder={`Search ${label.toLowerCase()}…`} value={q} onChange={(e) => { setQ(e.target.value); setHi(0); }}
-            onKeyDown={(e) => {
-              if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => Math.min(h + 1, shown.length - 1)); }
-              if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
-              if (e.key === 'Enter' && shown[hi]) { onPick(shown[hi].key); setOpen(false); }
-            }} style={{ marginBottom: 4 }} />
-          {shown.length === 0 && <div className="small muted" style={{ padding: 8 }}>{empty}</div>}
-          {shown.map((i, k) => (
-            <button key={i.key} className={k === hi ? 'hi' : ''} onClick={() => { onPick(i.key); setOpen(false); }}>
-              <span className="grow"><span>{i.text}</span>{i.sub && <div className="small muted" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{i.sub}</div>}</span>
-              <span className="mono" style={{ fontSize: 10.5, color: 'var(--muted-3)' }}>{i.key}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MoreMenu({ items }: { items: { label: string; run: () => void }[] }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useOutside(ref, () => setOpen(false));
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button className="tb" aria-haspopup="menu" aria-expanded={open} onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(!open)}>More ▾</button>
-      {open && <div className="menu" role="menu" style={{ top: 32, left: 0 }}>{items.map((i) => <button key={i.label} role="menuitem" onMouseDown={(e) => e.preventDefault()} onClick={() => { setOpen(false); i.run(); }}>{i.label}</button>)}</div>}
-    </div>
-  );
-}
-
-function FormatToolbar() {
-  const sel = useStore((s) => s.selection);
-  const bib = useStore((s) => s.bib);
-  const labels = useStore((s) => s.labels);
-  const project = useStore((s) => s.project)!;
-  const [, force] = useState(0);
-  useEffect(() => {
-    const ed = editorRef.current;
-    if (!ed) return;
-    const f = () => force((x) => x + 1);
-    ed.on('transaction', f);
-    return () => { ed.off('transaction', f); };
-  }, [editorRef.current]);
-  const ed = editorRef.current;
-  const chain = () => ed!.chain().focus();
-  const style = !ed ? 'p' : ed.isActive('heading', { level: 1 }) ? 'h1' : ed.isActive('heading', { level: 2 }) ? 'h2' : ed.isActive('heading', { level: 3 }) ? 'h3' : ed.isActive('codeBlock') ? 'code' : 'p';
-  const nextLabel = (prefix: string) => { let k = 1; while (labels.has(`${prefix}:new-${k}`)) k++; return `${prefix}:new-${k}`; };
-  const insert = (node: Record<string, unknown>) => { if (!ed) return; chain().insertContent(node).run(); };
-  const md = (e: React.MouseEvent) => e.preventDefault();
-  return (
-    <div className="toolbar" role="toolbar" aria-label="Formatting">
-      <label className="sr-only" htmlFor="pstyle">Paragraph style</label>
-      <select id="pstyle" className="field" style={{ width: 124, height: 28 }} value={style} disabled={!ed}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (v === 'p') chain().setParagraph().run();
-          else if (v === 'code') chain().setCodeBlock({ language: 'Python' }).run();
-          else chain().setHeading({ level: Number(v[1]) as 1 | 2 | 3 }).run();
-        }}>
-        <option value="p">Body text</option><option value="h1">Section</option><option value="h2">Subsection</option><option value="h3">Subsubsection</option><option value="code">Code</option>
-      </select>
-      <span className="vsep" />
-      <button className="tb" aria-label="Bold (Ctrl+B)" title="Bold  Ctrl+B" aria-pressed={!!ed?.isActive('bold')} onMouseDown={md} onClick={() => chain().toggleBold().run()} style={{ fontWeight: 700 }}>B</button>
-      <button className="tb" aria-label="Italic (Ctrl+I)" title="Italic  Ctrl+I" aria-pressed={!!ed?.isActive('italic')} onMouseDown={md} onClick={() => chain().toggleItalic().run()} style={{ fontStyle: 'italic', fontFamily: 'var(--serif)', fontSize: 14 }}>I</button>
-      <button className="tb" aria-label="Inline code (Ctrl+E)" title="Monospace  Ctrl+E" aria-pressed={!!ed?.isActive('code')} onMouseDown={md} onClick={() => chain().toggleCode().run()} style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{'{ }'}</button>
-      <button className="tb" aria-label="Bulleted list" aria-pressed={!!ed?.isActive('bulletList')} onMouseDown={md} onClick={() => chain().toggleBulletList().run()}><List /></button>
-      <button className="tb" aria-label="Numbered list" aria-pressed={!!ed?.isActive('orderedList')} onMouseDown={md} onClick={() => chain().toggleOrderedList().run()}><OList /></button>
-      <span className="vsep" />
-      <Picker label="Cite" empty="No entries in the bibliography." items={bib.map((b) => ({ key: b.key, text: `${b.author?.split(' and ')[0] ?? b.key} ${b.year ?? ''}`, sub: b.title }))} onPick={(k) => insert({ type: 'citation', attrs: { cmd: 'citep', keys: k, opts: '' } })} />
-      <Picker label="Cross-ref" empty="No labels yet. Give a section, table or equation a label first." items={[...labels.values()].map((l) => ({ key: l.label, text: `${{ section: 'Section', equation: 'Equation', table: 'Table', figure: 'Figure', other: '' }[l.kind]} ${l.number}`, sub: l.title }))} onPick={(k) => insert({ type: 'crossRef', attrs: { cmd: labels.get(k)?.kind === 'equation' ? 'eqref' : 'autoref', key: k } })} />
-      <span className="vsep" />
-      <button className="tb" onMouseDown={md} onClick={() => insert({ type: 'mathBlock', attrs: { env: 'equation', latex: 'y = \\beta_0 + \\beta_1 x', label: nextLabel('eq') } })}>Equation</button>
-      <button className="tb" onMouseDown={md} onClick={() => insert({ type: 'inlineMath', attrs: { latex: 'x', delim: 'dollar' } })} title="Inline math (or type $x$)">Math</button>
-      <button className="tb" onMouseDown={md} onClick={async () => {
-        const f = await api.chooseFile('Insert a figure', [{ name: 'Figures', extensions: ['png', 'jpg', 'jpeg', 'pdf'] }]);
-        if (!f) return;
-        const rel = await guard(() => api.importAsset(project.root, f, 'figures'));
-        if (rel) insert({ type: 'figureBlock', attrs: { path: rel, caption: 'Caption.', label: nextLabel('fig'), width: '0.8\\linewidth', placement: 'htbp', env: 'figure' } });
-      }}>Figure</button>
-      <button className="tb" onMouseDown={md} title="Static table (LaTeX)" onClick={() => insert({ type: 'rawBlock', attrs: { label: 'Table (LaTeX)', latex: `\\begin{table}[htbp]\n  \\centering\n  \\caption{Caption.}\n  \\label{${nextLabel('tab')}}\n  \\begin{tabular}{lrr}\n    \\toprule\n    Item & Value & Threshold \\\\\n    \\midrule\n    Example & 0.00 & 0.00 \\\\\n    \\bottomrule\n  \\end{tabular}\n\\end{table}` } })}>Table</button>
-      <MoreMenu items={[
-        { label: 'Footnote', run: () => insert({ type: 'footnote', attrs: { latex: 'Footnote text.' } }) },
-        { label: 'Code block', run: () => insert({ type: 'codeBlock', attrs: { language: 'Python' }, content: [{ type: 'text', text: '# code' }] }) },
-        { label: 'Callout (finding, note)', run: () => insert({ type: 'calloutBlock', attrs: { title: 'Finding F-0X · Severity: Medium' }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Describe the finding.' }] }] }) },
-        { label: 'Page break', run: () => insert({ type: 'pageBreak', attrs: { cmd: 'clearpage' } }) },
-        { label: 'Raw LaTeX block', run: () => insert({ type: 'rawBlock', attrs: { label: 'LaTeX', latex: '% your LaTeX here' } }) },
-        { label: 'Appendix marker', run: () => insert({ type: 'rawBlock', attrs: { label: 'Appendices start here', latex: '\\appendix' } }) },
-      ]} />
-      <span className="spacer" />
-      <button className="btn btn-sm" style={{ borderStyle: 'dashed', borderColor: 'var(--faint)' }} onClick={() => setState({ view: 'tests', insertAfter: sel ? parsedIndexForEditor(sel.index) : null })}>Test result…</button>
-    </div>
-  );
-}
-
 function SourcePane() {
   const project = useStore((s) => s.project)!;
   const file = useStore((s) => s.sourceFile) || mainFile();
   const renders = useStore((s) => s.renders);
   const sourceLine = useStore((s) => s.sourceLine);
-  const files = project.files.filter((f) => f.kind === 'tex' || f.kind === 'bib');
-  const ordered = [mainFile(), ...files.map((f) => f.path).filter((p) => p !== mainFile() && !p.startsWith('generated/')), ...files.map((f) => f.path).filter((p) => p.startsWith('generated/'))];
-  const loaded = useStore((s) => !!s.files[file]);
+  const openTabs = useStore((s) => s.openTabs);
+  const files = useStore((s) => s.files);
+  const tabs = [mainFile(), ...openTabs.filter((p) => p !== mainFile())];
+  if (!tabs.includes(file)) tabs.push(file);
+  const loaded = !!files[file];
   useEffect(() => { if (!loaded) void guard(() => openFile(file)); }, [file, loaded]);
   const conflicts = Object.entries(renders).filter(([, r]) => r.status === 'conflict' || r.status === 'edited');
   const showInPdf = async () => {
@@ -146,16 +43,30 @@ function SourcePane() {
   return (
     <section className="pane" aria-label="LaTeX source">
       <div className="ftabs">
-        {ordered.slice(0, 12).map((p) => {
-          const dirty = (() => { const f = getState().files[p]; return f && f.text !== f.saved; })();
-          return (
-            <button key={p} className="ftab" aria-current={p === file ? 'page' : undefined} title={p.startsWith('generated/') ? 'Generated: read-only' : p}
-              onClick={async () => { await guard(() => openFile(p)); setState({ sourceFile: p }); }}>
-              {p}{dirty && <span className="dot" style={{ background: 'var(--warn)' }} aria-label="unsaved" />}
-            </button>
-          );
-        })}
-        <span className="spacer" />
+        <div className="ftabs-scroll" role="tablist" aria-label="Open files">
+          {tabs.map((p) => {
+            const f = files[p];
+            const dirty = f && f.text !== f.saved;
+            const main = p === mainFile();
+            return (
+              <div key={p} role="tab" aria-selected={p === file} className="ftab" title={p.startsWith('generated/') ? `${p} (generated, read-only)` : p}
+                onMouseDown={(e) => { if (e.button === 1 && !main) { e.preventDefault(); closeTab(p); } }}
+                onClick={async () => { await guard(() => openFile(p)); setState({ sourceFile: p }); }}
+                onContextMenu={(e) => { e.preventDefault(); openContextMenu(e, [
+                  { label: 'Close', disabled: main, run: () => closeTab(p) },
+                  { label: 'Close other tabs', run: () => { for (const t of getState().openTabs) if (t !== p) closeTab(t); } },
+                  { separator: true },
+                  { label: 'Copy path', run: () => void navigator.clipboard.writeText(p) },
+                  { label: 'Show in folder', run: () => void api.revealInFolder(`${project.root}/${p}`) },
+                ]); }}>
+                <span className="ftab-name">{p.split('/').pop()}</span>
+                {dirty && <span className="dot" style={{ background: 'var(--warn)' }} aria-label="unsaved" />}
+                {!main && <button className="ftab-x" aria-label={`Close ${p}`} onClick={(e) => { e.stopPropagation(); closeTab(p); }}><X size={10} /></button>}
+              </div>
+            );
+          })}
+          <button className="ftab ftab-add" title="Open a file  Ctrl+O" aria-label="Open a file" onClick={() => setState({ quickOpen: true })}>+</button>
+        </div>
         <div className="row" style={{ padding: '0 12px', whiteSpace: 'nowrap' }}>
           <button className="btn btn-q btn-sm" onClick={showInPdf} title="Jump to this line in the PDF (SyncTeX)">Show in PDF</button>
         </div>
@@ -176,6 +87,22 @@ function SourcePane() {
   );
 }
 
+function RightPanel() {
+  const panel = useStore((s) => s.panel);
+  const open = useStore((s) => s.comments.filter((t) => t.file === mainFile() && !t.resolved).length);
+  if (!panel.open) return null;
+  return (
+    <aside className="panel-right" aria-label={panel.tab === 'comments' ? 'Comments' : 'Properties'}>
+      <div className="tabs" role="tablist">
+        <button className="tab" role="tab" aria-selected={panel.tab === 'properties'} onClick={() => setState({ panel: { open: true, tab: 'properties', auto: false } })}>Properties</button>
+        <button className="tab" role="tab" aria-selected={panel.tab === 'comments'} onClick={() => setState({ panel: { open: true, tab: 'comments', auto: false } })}>Comments{open ? <span className="countpill">{open}</span> : null}</button>
+        <button className="btn btn-q ib btn-sm" style={{ marginLeft: 'auto' }} aria-label="Close panel" title={panel.auto ? 'Close (opens again when you select an equation, table or figure)' : 'Close  Ctrl+Alt+P'} onClick={() => setState({ panel: { ...panel, open: false, auto: true } })}><X /></button>
+      </div>
+      {panel.tab === 'comments' ? <CommentsPanel /> : <Properties />}
+    </aside>
+  );
+}
+
 export function EditorScreen() {
   const mode = useStore((s) => s.mode);
   const navOpen = useStore((s) => s.navOpen);
@@ -184,7 +111,7 @@ export function EditorScreen() {
   const project = useStore((s) => s.project)!;
   return (
     <>
-      <TitleBar center={<ModeSwitch />} right={<><RunTestsButton /><CompileButton /><ExportMenu /><button className="btn btn-q no-drag" onClick={() => setState({ view: 'setup' })} title="Document setup"><Gear />Setup</button></>} />
+      <TitleBar center={<ModeSwitch />} right={<><RunTestsButton /><CompileButton /><ExportMenu /><button className="btn btn-q no-drag" onClick={() => setState({ view: 'setup' })} title="Document setup" aria-label="Document setup"><Gear /><span className="tlabel">Setup</span></button></>} />
       <div className="body">
         {navOpen ? <Navigator /> : (
           <nav aria-label="Navigator (collapsed)" style={{ width: 44, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 0', background: 'var(--panel)', borderRight: '1px solid var(--rule)' }}>
@@ -200,6 +127,7 @@ export function EditorScreen() {
             </div>
           )}
           {mode !== 'source' && <FormatToolbar />}
+          {mode !== 'source' && <FindBar />}
           {mode === 'visual' && <VisualEditor />}
           {mode === 'split' && (
             <div className="split">
@@ -209,7 +137,7 @@ export function EditorScreen() {
           )}
           {mode === 'source' && <div className="split"><SourcePane /></div>}
         </section>
-        {mode !== 'source' && <Properties />}
+        {mode !== 'source' && <RightPanel />}
       </div>
       <StatusBar>
         {sourceLine && mode !== 'visual' && <span className="sb">Ln {sourceLine}</span>}

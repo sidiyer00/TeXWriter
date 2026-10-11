@@ -1,5 +1,7 @@
 // Right panel: settings for whatever is selected in the visual editor.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { MathInput, type MathInputHandle } from './MathInput';
+import { TABLE_STYLES } from '../../shared/latex/table';
 import { editorRef } from '../visual/editorRef';
 import { texToHtml } from '../visual/nodes';
 import { allDiagnostics, api, getRun, gotoSource, guard, mainBlockLines, mainFile, refreshBlock, restoreBlock, setState, unlinkBlock, updateBlockConfig, useStore, latestRun } from '../store';
@@ -36,15 +38,30 @@ const SYMBOLS: [string, string, string][] = [
   ['≈', '\\approx', 'Approximately'], ['α', '\\alpha', 'alpha'], ['β', '\\beta', 'beta'], ['σ', '\\sigma', 'sigma'], ['ℙ', '\\mathbb{P}', 'Probability'], ['E', '\\mathbb{E}', 'Expectation'],
 ];
 
+function MaxButton({ pos, inline }: { pos: number; inline: boolean }) {
+  return (
+    <button className="btn btn-q btn-xs" title="Open the large equation editor (or double-click the equation)" aria-label="Maximize equation editor"
+      onClick={() => setState({ equationModal: { pos, inline } })}>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>Maximize
+    </button>
+  );
+}
+
+function useLiveLatex(pos: number, value: string) {
+  const [latex, setLatex] = useState<string>(value ?? '');
+  const last = useRef(value);
+  useEffect(() => { if (value !== last.current) { last.current = value; setLatex(value ?? ''); } }, [value, pos]);
+  useEffect(() => { if (latex === last.current) return; const t = setTimeout(() => { last.current = latex; setAttrs(pos, { latex }); }, 250); return () => clearTimeout(t); }, [latex]);
+  return [latex, setLatex] as const;
+}
+
 function EquationPanel({ pos, attrs }: { pos: number; attrs: Record<string, any> }) {
-  const [latex, setLatex] = useState<string>(attrs.latex ?? '');
-  useEffect(() => setLatex(attrs.latex ?? ''), [attrs.latex, pos]);
-  useEffect(() => { if (latex === attrs.latex) return; const t = setTimeout(() => setAttrs(pos, { latex }), 250); return () => clearTimeout(t); }, [latex]);
+  const [latex, setLatex] = useLiveLatex(pos, attrs.latex);
+  const handle = useRef<MathInputHandle | null>(null);
   const env: string = attrs.env;
   const multi = /^align|^gather|^multline/.test(env);
   const r = texToHtml(multi ? `\\begin{aligned}${latex}\\end{aligned}` : latex || '\\square', true);
   const numbered = !env.endsWith('*') && env !== 'displaymath';
-  const insert = (s: string) => setLatex((l) => (l ? `${l} ${s}` : s));
   return (
     <>
       <div className="sec">
@@ -53,13 +70,12 @@ function EquationPanel({ pos, attrs }: { pos: number; attrs: Record<string, any>
         {r.error && <div className="small t-fail">Preview: {r.error.replace(/^KaTeX parse error: /, '')}. LaTeX may still compile it.</div>}
       </div>
       <div className="sec">
-        <div className="lbl">LaTeX</div>
+        <div className="row"><span className="lbl grow">LaTeX</span><MaxButton pos={pos} inline={false} /></div>
         <div role="toolbar" aria-label="Insert math" className="row wrap" style={{ gap: 4 }}>
-          {SYMBOLS.map(([g, s, n]) => <button key={n} className="sym" aria-label={n} title={`${n}: ${s}`} onClick={() => insert(s)}>{g}</button>)}
+          {SYMBOLS.map(([g, sym, n]) => <button key={n} className="sym" aria-label={n} title={`${n}: ${sym}`} onClick={() => handle.current?.insert(sym)}>{g}</button>)}
         </div>
-        <label className="sr-only" htmlFor="eqsrc">Equation LaTeX</label>
-        <textarea id="eqsrc" className="field mono" rows={5} value={latex} onChange={(e) => setLatex(e.target.value)} spellCheck={false} />
-        <div className="small muted">Edits write to the source as you type.</div>
+        <MathInput key={pos} value={latex} onChange={setLatex} minHeight={110} handleRef={handle} />
+        <div className="small muted">Type \ for suggestions (\su → \sum). Drag the corner to resize. Edits write to the source as you type.</div>
       </div>
       <div className="sec">
         <label className="chk"><input type="checkbox" checked={numbered} onChange={(e) => {
@@ -70,6 +86,63 @@ function EquationPanel({ pos, attrs }: { pos: number; attrs: Record<string, any>
           <option value="equation">equation</option><option value="align">align (multi-line, use &amp; and \\)</option><option value="gather">gather</option>
         </select></label>
         {numbered && <Debounced label="Label" mono value={attrs.label ?? ''} onCommit={(v) => setAttrs(pos, { label: v.trim() })} placeholder="eq:name" />}
+        {numbered && <RefCount label={attrs.label} />}
+      </div>
+    </>
+  );
+}
+
+function InlineMathPanel({ pos, attrs }: { pos: number; attrs: Record<string, any> }) {
+  const [latex, setLatex] = useLiveLatex(pos, attrs.latex);
+  const r = texToHtml(latex || '\\square', false);
+  return (
+    <div className="sec">
+      <div className="row"><span className="lbl grow">Inline math</span><MaxButton pos={pos} inline /></div>
+      <div className="katex-preview" dangerouslySetInnerHTML={{ __html: r.html }} />
+      <MathInput key={pos} value={latex} onChange={setLatex} minHeight={56} />
+      <div className="small muted">Type \ for suggestions.</div>
+    </div>
+  );
+}
+
+function TablePanel({ pos, attrs }: { pos: number; attrs: Record<string, any> }) {
+  const cols: string[] = String(attrs.cols || '').split(/\s+/).filter(Boolean);
+  const set = (p: Record<string, unknown>) => setAttrs(pos, p);
+  const floating = attrs.env !== 'none';
+  return (
+    <>
+      <div className="sec">
+        <div className="lbl">Style</div>
+        <div className="col" style={{ gap: 4 }}>
+          {TABLE_STYLES.map((t) => (
+            <label key={t.id} className="chk" title={t.hint}><input type="radio" name="tstyle" checked={(attrs.style ?? 'booktabs') === t.id} onChange={() => set({ style: t.id })} /><span><b style={{ fontWeight: 500 }}>{t.label}</b> <span className="small muted">— {t.hint}</span></span></label>
+          ))}
+        </div>
+        <label className="chk"><input type="checkbox" checked={attrs.size === 'small'} onChange={(e) => set({ size: e.target.checked ? 'small' : '' })} />Smaller font</label>
+      </div>
+      <div className="sec">
+        <div className="lbl">Columns</div>
+        <div className="row wrap" style={{ gap: 4 }}>
+          {cols.map((c, i) => (
+            <select key={i} className="field" aria-label={`Column ${i + 1} alignment`} style={{ width: 64, height: 28 }} value={/^[lcr]$/.test(c) ? c : 'l'}
+              onChange={(e) => { const n = [...cols]; n[i] = e.target.value; set({ cols: n.join(' ') }); }}>
+              <option value="l">{i + 1}: L</option><option value="c">{i + 1}: C</option><option value="r">{i + 1}: R</option>
+            </select>
+          ))}
+        </div>
+        <div className="small muted">Merge cells by dragging across them, then Merge cells in the table toolbar or right-click menu. Header rows above the first rule print as the table head; merged header cells get a partial rule underneath (multi-level headers).</div>
+      </div>
+      <div className="sec">
+        <div className="lbl">Caption and label</div>
+        <label className="chk"><input type="checkbox" checked={floating} onChange={(e) => set({ env: e.target.checked ? 'table' : 'none' })} />Numbered table with caption (float)</label>
+        {floating && <>
+          <Debounced label="Caption" multiline value={attrs.caption ?? ''} onCommit={(v) => set({ caption: v })} />
+          <Debounced label="Label" mono value={attrs.label ?? ''} onCommit={(v) => set({ label: v.trim() })} placeholder="tab:name" />
+          <RefCount label={attrs.label} />
+          <label className="f">Caption position<select className="field" value={attrs.captionPos === 'bottom' ? 'bottom' : 'top'} onChange={(e) => set({ captionPos: e.target.value })}><option value="top">Above the table</option><option value="bottom">Below the table</option></select></label>
+          <label className="f">Placement<select className="field" value={attrs.placement ?? 'htbp'} onChange={(e) => set({ placement: e.target.value })}><option value="htbp">Best fit (htbp)</option><option value="t">Top of page</option><option value="H">Here (needs float)</option><option value="">Default</option></select></label>
+          <label className="chk"><input type="checkbox" checked={attrs.env === 'table*'} onChange={(e) => set({ env: e.target.checked ? 'table*' : 'table' })} />Span both columns (two-column layouts)</label>
+        </>}
       </div>
     </>
   );
@@ -229,10 +302,7 @@ function InlinePanel({ inline }: { inline: { type: string; attrs: Record<string,
     );
   }
   if (inline.type === 'footnote') return <div className="sec"><div className="lbl">Footnote</div><Debounced label="Text (LaTeX)" multiline rows={4} value={a.latex} onCommit={(v) => set({ latex: v })} /></div>;
-  if (inline.type === 'inlineMath') {
-    const r = texToHtml(a.latex || '\\square', false);
-    return <div className="sec"><div className="lbl">Inline math</div><div className="katex-preview" dangerouslySetInnerHTML={{ __html: r.html }} /><Debounced label="LaTeX" mono value={a.latex} onCommit={(v) => set({ latex: v })} /></div>;
-  }
+  if (inline.type === 'inlineMath') return <InlineMathPanel pos={inline.pos} attrs={a} />;
   return <div className="sec"><div className="lbl">LaTeX command</div><Debounced label="Source" mono value={a.latex} onCommit={(v) => set({ latex: v })} /><div className="small muted">Shown as source because the visual editor does not model this command.</div></div>;
 }
 
@@ -264,7 +334,7 @@ export function Properties() {
   const sel = useStore((s) => s.selection);
   const project = useStore((s) => s.project);
   rootCache = project?.root ?? '';
-  const titleFor: Record<string, string> = { heading: 'Heading', paragraph: 'Paragraph', mathBlock: 'Equation', generatedBlock: 'Generated content', figureBlock: 'Figure', rawBlock: 'LaTeX block', calloutBlock: 'Callout', codeBlock: 'Code block', bulletList: 'List', orderedList: 'Numbered list', pageBreak: 'Page break' };
+  const titleFor: Record<string, string> = { heading: 'Heading', paragraph: 'Paragraph', mathBlock: 'Equation', generatedBlock: 'Generated content', figureBlock: 'Figure', rawBlock: 'LaTeX block', tableBlock: 'Table', calloutBlock: 'Callout', codeBlock: 'Code block', bulletList: 'List', orderedList: 'Numbered list', pageBreak: 'Page break' };
   let body: React.ReactNode;
   if (!sel) body = <DocumentPanel />;
   else if (sel.inline) body = <InlinePanel inline={sel.inline} />;
@@ -273,6 +343,7 @@ export function Properties() {
     switch (sel.type) {
       case 'mathBlock': body = <EquationPanel pos={sel.pos} attrs={a} />; break;
       case 'generatedBlock': body = <GeneratedPanel id={a.id} />; break;
+      case 'tableBlock': body = <TablePanel pos={sel.pos} attrs={a} />; break;
       case 'heading':
         body = (
           <div className="sec">
@@ -320,14 +391,14 @@ export function Properties() {
     }
   }
   return (
-    <aside className="panel-right" aria-label="Selection properties">
+    <div className="col" style={{ gap: 0, flex: 1, minHeight: 0 }} aria-label="Selection properties">
       <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--rule-2)' }}>
         <div className="lbl">{sel ? (sel.inline ? 'Inline element' : 'Selection') : 'Nothing selected'}</div>
         <div style={{ fontWeight: 600, fontSize: 14 }}>{sel ? (sel.inline ? ({ citation: 'Citation', crossRef: 'Cross-reference', footnote: 'Footnote', inlineMath: 'Inline math', inlineRaw: 'LaTeX command' } as Record<string, string>)[sel.inline.type] : titleFor[sel.type] ?? sel.type) : 'Document'}</div>
         {sel && !sel.inline && <button className="btn btn-q btn-xs" style={{ marginTop: 4, paddingLeft: 0 }} onClick={() => { const l = editorBlockLines()[sel.index]; if (l) gotoSource(mainFile(), l[0]); }}>Source: lines {(() => { const l = editorBlockLines()[sel.index]; return l ? `${l[0]}–${l[1]}` : '—'; })()}</button>}
       </div>
       <div className="scroll" style={{ flex: 1 }}>{body}</div>
-    </aside>
+    </div>
   );
 }
 

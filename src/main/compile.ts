@@ -9,6 +9,7 @@ import { hash } from '../shared/latex/scan';
 import { childEnv, toolchain } from './toolchain';
 import { BUILD_DIR } from './project';
 import { killTree } from './runs';
+import { getSettings } from './settings';
 
 let current: ChildProcess | null = null;
 let cancelled = false;
@@ -72,13 +73,18 @@ export async function compile(root: string, m: ProjectManifest, emit: (e: Compil
     current = null;
     return {
       ok: false, pdfPath: null, pages: null, durationMs: 0, startedAt, log: '', passes: [], texHash, usedFallback: false,
-      diagnostics: [{ id: 'tc', severity: 'error', kind: 'error', message: `${m.engine} was not found on this computer.`, detail: 'Install MiKTeX (miktex.org) or TeX Live, then restart Quire. Quire looks on PATH and in the default MiKTeX/TeX Live folders.' }],
+      diagnostics: [{ id: 'tc', severity: 'error', kind: 'error', message: `${m.engine} was not found on this computer.`, detail: 'Install MiKTeX (miktex.org) or TeX Live. Quire looks on PATH, in the registry and in the default install folders; if it is installed somewhere else, set the folder in Settings → Tools.' }],
     };
   }
 
-  if (tc.latexmk) {
+  const miktex = tc.distribution === 'MiKTeX';
+  const installFlag = miktex && getSettings().autoInstallPackages ? ['--enable-installer'] : [];
+  // MiKTeX's latexmk is a Perl script; without Perl it only pops up an error, so skip it
+  const canLatexmk = !!tc.latexmk && !(miktex && !tc.perl);
+  if (canLatexmk) {
     passEmit({ type: 'pass', name: 'latexmk' });
-    const r = await run(tc.latexmk, [ENGINE_FLAG[m.engine], '-interaction=nonstopmode', '-file-line-error', '-synctex=1', `-outdir=${BUILD_DIR}`, main], root, passEmit, env);
+    const engineOverride = installFlag.length ? [`-${m.engine === 'pdflatex' ? 'pdflatex' : m.engine}=${m.engine} ${installFlag.join(' ')} %O %S`] : [];
+    const r = await run(tc.latexmk!, [ENGINE_FLAG[m.engine], ...engineOverride, '-interaction=nonstopmode', '-file-line-error', '-synctex=1', `-outdir=${BUILD_DIR}`, main], root, passEmit, env);
     out += r.out;
     // MiKTeX ships latexmk but it needs Perl; fall back when it could not run at all
     if (!cancelled && (r.code === null || /perl/i.test(r.out) && !fs.existsSync(logPath))) usedFallback = true;
@@ -86,7 +92,7 @@ export async function compile(root: string, m: ProjectManifest, emit: (e: Compil
 
   if (usedFallback && engineExe && !cancelled) {
     out += '\n[quire] running the engine directly (latexmk unavailable)\n';
-    const engineArgs = ['-interaction=nonstopmode', '-file-line-error', '-synctex=1', `-output-directory=${BUILD_DIR}`, main];
+    const engineArgs = [...installFlag, '-interaction=nonstopmode', '-file-line-error', '-synctex=1', `-output-directory=${BUILD_DIR}`, main];
     passEmit({ type: 'pass', name: m.engine });
     out += (await run(engineExe, engineArgs, root, passEmit, env)).out;
     const aux = await fsp.readFile(path.join(outDir, `${stem}.aux`), 'utf8').catch(() => '');

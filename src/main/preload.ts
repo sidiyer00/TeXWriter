@@ -49,6 +49,17 @@ const api: QuireApi = {
   exportProvenance: (root) => call('exportProvenance', root),
   revealInFolder: (abs) => call('revealInFolder', abs),
   openExternal: (url) => call('openExternal', url),
+  openPath: (abs) => call('openPath', abs),
+  getSettings: () => call('getSettings'),
+  saveSettings: (p) => call('saveSettings', p),
+  redetectTools: () => call('redetectTools'),
+  onWindowFocus: (cb) => on('window-focus', () => cb()),
+  onSpell: (cb) => on('spell', cb),
+  replaceMisspelling: (w) => call('replaceMisspelling', w),
+  addToDictionary: (w) => call('addToDictionary', w),
+  editCommand: (c) => call('editCommand', c),
+  setZoom: (f) => call('setZoom', f),
+  appInfo: () => call('appInfo'),
   onFlush: (cb) => on('flush', async () => { try { await cb(); } finally { ipcRenderer.send('flushed'); } }),
 };
 

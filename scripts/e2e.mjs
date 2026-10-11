@@ -67,7 +67,7 @@ await step('compile', async () => {
 });
 await step('setup', async () => {
   await win.getByRole('button', { name: /Back to editor/ }).click();
-  await win.getByRole('button', { name: /^Setup$/ }).click();
+  await win.getByRole('button', { name: 'Document setup' }).click();
   await shot('07-setup');
 });
 await step('source', async () => {
@@ -106,6 +106,201 @@ await step('round-trip-edits', async () => {
   if (stale < 1) throw new Error('expected stale blocks');
   await win.locator('.blk-gen.stale').first().scrollIntoViewIfNeeded();
   await shot('10-stale');
+});
+const projDirOf = () => { const qdir = [path.join(home, 'Documents', 'Quire'), path.join(home, 'Quire')].find((d) => fs.existsSync(d)); return path.join(qdir, fs.readdirSync(qdir)[0]); };
+const texNow = () => fs.readFileSync(path.join(projDirOf(), 'report.tex'), 'utf8');
+const selectWord = async (loc) => { await loc.dblclick(); await win.waitForTimeout(150); };
+
+await step('toolbar-overflow', async () => {
+  await win.getByRole('button', { name: 'Visual' }).click();
+  await win.setViewportSize({ width: 980, height: 800 });
+  await win.waitForTimeout(600);
+  const h = await win.locator('.toolbar').first().evaluate((el) => el.getBoundingClientRect().height);
+  if (h > 48) throw new Error(`toolbar wraps (${h}px)`);
+  await win.getByRole('button', { name: /^More/ }).first().waitFor();
+  await shot('11-toolbar-narrow');
+  await win.getByRole('button', { name: /^More/ }).first().click();
+  await shot('12-more-menu');
+  await win.keyboard.press('Escape');
+  await win.setViewportSize({ width: 1440, height: 900 });
+  await win.waitForTimeout(400);
+});
+await step('underline-colour', async () => {
+  const p = win.locator('.ProseMirror > p').nth(2);
+  await p.scrollIntoViewIfNeeded();
+  await p.dblclick({ position: { x: 60, y: 10 } });
+  await win.waitForTimeout(300); // ProseMirror reads the DOM selection on selectionchange
+  console.log('focus/sel', await win.evaluate(() => document.activeElement.className + ' | ' + window.getSelection().toString()));
+  await win.keyboard.press('Control+u');
+  await win.waitForTimeout(200);
+  console.log('u after ctrl+u', await win.locator('.ProseMirror u').count());
+  await win.evaluate(() => { const w = window; w.__log = []; let last = w.__quireState().files['report.tex']?.version; w.__iv = setInterval(() => { const f = w.__quireState().files['report.tex']; if (f.version !== last) { w.__log.push(f.origin + ':' + f.version + ':' + document.querySelectorAll('.ProseMirror u').length); last = f.version; } }, 10); });
+  await win.keyboard.press('Control+Shift+h');
+  await win.waitForTimeout(1500);
+  console.log('version log', await win.evaluate(() => { clearInterval(window.__iv); return window.__log.join(' '); }));
+  if (!(await win.locator('.ProseMirror u').count())) throw new Error('no <u> after Ctrl+U');
+  const t = texNow();
+  if (!/\\underline\{/.test(t)) throw new Error('\\underline not written');
+  if (!/\\quirehl\{FFF176\}/.test(t)) throw new Error('\\quirehl not written');
+});
+await step('find-replace', async () => {
+  await win.locator('.ProseMirror > p').first().click();
+  await win.keyboard.press('Control+h');
+  await win.getByRole('searchbox').or(win.getByLabel('Find', { exact: true })).first().fill('calibration');
+  await win.waitForTimeout(300);
+  const status = await win.locator('.findbar [aria-live]').innerText();
+  if (!/of \d+/.test(status)) throw new Error(`find status: ${status}`);
+  const n = Number(/of (\d+)/.exec(status)[1]);
+  const hl = await win.locator('.find-match').count();
+  if (hl < 1) throw new Error('no find highlights');
+  await shot('13-find');
+  await win.getByLabel('Replace with').fill('calibrationX');
+  await win.getByRole('button', { name: 'Replace all' }).click();
+  await win.waitForTimeout(1500);
+  const cnt = (texNow().match(/calibrationX/g) ?? []).length;
+  console.log('find matches', n, 'replaced', cnt);
+  if (cnt !== n) throw new Error(`replace all: ${n} matches but ${cnt} replaced`);
+  await win.getByRole('button', { name: 'Close find (Esc)' }).click();
+  await win.keyboard.press('Control+z');
+  await win.waitForTimeout(1500);
+  if (texNow().includes('calibrationX')) throw new Error('undo of replace all failed');
+});
+await step('table', async () => {
+  const last = win.locator('.ProseMirror > p').nth(3);
+  await last.click();
+  await win.keyboard.press('End');
+  await win.keyboard.press('Control+Alt+t');
+  await win.getByRole('button', { name: /^Insert \d+ × \d+ table$/ }).click();
+  await win.locator('.tblock').first().waitFor();
+  await win.waitForTimeout(900);
+  if (!(await win.locator('.panel-right').count())) throw new Error('properties panel did not auto-open for table');
+  await win.keyboard.type('Grade');
+  await win.keyboard.press('Tab');
+  await win.keyboard.type('PD');
+  await win.getByRole('toolbar', { name: 'Table' }).waitFor();
+  await shot('14-table');
+  await win.waitForTimeout(1500);
+  const t = texNow();
+  if (!/\\begin\{tabular\}\{l r r\}|\\begin\{tabular\}\{lrr\}/.test(t) && !/\\begin\{tabular\}/.test(t)) throw new Error('table not serialized');
+  if (!t.includes('Grade')) throw new Error('cell text not serialized');
+  // leave the table: panel closes again
+  await win.locator('.ProseMirror > p').first().click();
+  await win.waitForTimeout(900);
+  if (await win.locator('.panel-right').count()) throw new Error('panel stayed open after leaving the table');
+});
+await step('comments', async () => {
+  const p = win.locator('.ProseMirror > p').nth(1);
+  await p.scrollIntoViewIfNeeded();
+  await p.click({ clickCount: 3 });
+  await win.keyboard.press('Control+Alt+m');
+  await win.getByPlaceholder(/Add a comment/).fill('Please cite the source for this.');
+  await win.keyboard.press('Control+Enter');
+  await win.waitForTimeout(1200);
+  if (!(await win.locator('.ProseMirror .cmt').count())) throw new Error('no comment highlight');
+  const f = path.join(projDirOf(), 'quire-comments.json');
+  if (!fs.existsSync(f) || !fs.readFileSync(f, 'utf8').includes('Please cite')) throw new Error('comment not saved');
+  await win.locator('.thread').first().click();
+  await win.getByRole('button', { name: 'Reply…' }).click();
+  await win.getByPlaceholder('Reply…').fill('Added Tasche (2013).');
+  await win.keyboard.press('Control+Enter');
+  await win.waitForTimeout(500);
+  await shot('15-comments');
+  await win.getByRole('button', { name: 'Resolve thread' }).click();
+  await win.waitForTimeout(600);
+  if (!fs.readFileSync(f, 'utf8').includes('"resolved": true')) throw new Error('resolve not saved');
+});
+await step('context-menu', async () => {
+  const p = win.locator('.ProseMirror > p').nth(2);
+  await p.click({ button: 'right' });
+  await win.locator('.ctx-root .menu').waitFor();
+  await shot('16-context-menu');
+  await win.keyboard.press('Escape');
+});
+await step('ctrl-click-ref', async () => {
+  const ref = win.locator('.chip-ref').first();
+  await ref.scrollIntoViewIfNeeded();
+  const before = await win.evaluate(() => document.querySelector('.doc-canvas').scrollTop);
+  await ref.click({ modifiers: ['Control'] });
+  await win.waitForTimeout(900);
+  const after = await win.evaluate(() => document.querySelector('.doc-canvas').scrollTop);
+  console.log('scroll before/after ctrl+click', before, after);
+  if (Math.abs(after - before) < 20 && !(await win.locator('.sync-target').count())) throw new Error('ctrl+click did not navigate');
+});
+await step('drag-ref', async () => {
+  // Playwright cannot start a native drag under xvfb, so dispatch the DnD events ProseMirror handles.
+  const refs0 = (texNow().match(/\\(auto|eq)?ref\{/g) ?? []).length;
+  const para = win.locator('.ProseMirror > p', { has: win.locator('.chip-ref') }).first();
+  await para.scrollIntoViewIfNeeded();
+  const pb = await para.boundingBox();
+  const chip = para.locator('.chip-ref').first();
+  const cb = await chip.boundingBox();
+  await win.mouse.click(pb.x + 1, pb.y + 8);
+  await win.keyboard.down('Shift');
+  await win.mouse.click(cb.x + cb.width + 2, cb.y + cb.height / 2);
+  await win.keyboard.up('Shift');
+  await win.waitForTimeout(400);
+  console.log('drag selection', await win.evaluate(() => window.getSelection().toString().length));
+  const idx = await win.evaluate(() => {
+    const chipEl = document.querySelector('.ProseMirror > p .chip-ref');
+    const ps = [...document.querySelectorAll('.ProseMirror > p')];
+    const tgt = ps.find((p) => !p.querySelector('.chip-ref') && p.textContent.length > 40 && !p.querySelector('.chip-cite') && p !== chipEl.closest('p'));
+    if (!tgt) return -1;
+    tgt.scrollIntoView({ block: 'center' });
+    const cr = chipEl.getBoundingClientRect(); const tr = tgt.getBoundingClientRect();
+    const dt = new DataTransfer();
+    const ev = (type, el, x, y) => el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y }));
+    ev('dragstart', chipEl, cr.left + 2, cr.top + cr.height / 2);
+    ev('dragover', tgt, tr.left + 30, tr.top + 8);
+    ev('drop', tgt, tr.left + 30, tr.top + 8);
+    ev('dragend', chipEl, 0, 0);
+    return ps.indexOf(tgt);
+  });
+  await win.waitForTimeout(1500);
+  const moved = idx < 0 ? 0 : await win.evaluate((i) => document.querySelectorAll('.ProseMirror > p')[i].querySelectorAll('.chip-ref').length, idx);
+  const refs1 = (texNow().match(/\\(auto|eq)?ref\{/g) ?? []).length;
+  console.log('refs before/after drag', refs0, refs1, 'chips in drop target', moved);
+  if (refs1 < refs0 || moved < 1) throw new Error('cross-references lost in drag-and-drop');
+  await shot('16b-after-drag');
+  await win.keyboard.press('Control+z');
+  await win.waitForTimeout(800);
+});
+await step('equation-autocomplete', async () => {
+  const eq = win.locator('.eq').first();
+  await eq.scrollIntoViewIfNeeded();
+  await win.waitForTimeout(900);
+  await eq.dblclick();
+  await win.locator('.eqmodal').waitFor();
+  await win.locator('.eqmodal .cm-content').click();
+  await win.keyboard.press('Control+End');
+  await win.keyboard.type(' + \\su');
+  await win.locator('.cm-tooltip-autocomplete').waitFor({ timeout: 3000 });
+  const txt = await win.locator('.cm-tooltip-autocomplete').innerText();
+  if (!txt.includes('\\sum')) throw new Error(`no \\sum suggestion: ${txt.slice(0, 200)}`);
+  await shot('17-equation-modal');
+  await win.getByRole('button', { name: 'Discard changes' }).click();
+});
+await step('python-highlight', async () => {
+  const n = await win.locator('.ProseMirror pre .hljs-keyword').count();
+  if (!n) throw new Error('no Python syntax colouring');
+  const sc = await win.locator('.ProseMirror pre').first().getAttribute('spellcheck');
+  if (sc !== 'false') throw new Error('spellcheck still on in code');
+});
+await step('files-tab', async () => {
+  await win.getByRole('tab', { name: 'Files' }).click();
+  await win.getByRole('treeitem', { name: /preamble\.tex/ }).click();
+  await win.waitForTimeout(600);
+  if (!(await win.getByRole('tab', { name: /preamble\.tex/ }).count())) throw new Error('preamble.tex tab not opened');
+  const tabs = await win.locator('.ftabs-scroll [role=tab]').count();
+  if (tabs !== 2) throw new Error(`expected 2 source tabs, got ${tabs}`);
+  await shot('18-files-tab');
+  await win.getByRole('button', { name: 'Close preamble.tex' }).click();
+  await win.getByRole('button', { name: 'Visual' }).click();
+});
+await step('settings', async () => {
+  await win.keyboard.press('Control+,');
+  await win.getByText('Keyboard shortcuts').first().waitFor();
+  await shot('19-settings');
+  await win.getByRole('button', { name: /Back to document/ }).click();
 });
 await step('home-again', async () => {
   await win.getByRole('button', { name: 'Quire home' }).click();

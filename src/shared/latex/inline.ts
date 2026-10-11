@@ -8,7 +8,7 @@ const NBSP = ' ';
 
 const SYMBOL_ESCAPES: Record<string, string> = { '%': '%', '&': '&', '#': '#', '_': '_', '$': '$', '{': '{', '}': '}', ' ': ' ' };
 
-const MARK_COMMANDS: Record<string, Mark['type']> = { textbf: 'bold', textit: 'italic', emph: 'italic', texttt: 'code' };
+const MARK_COMMANDS: Record<string, Mark['type']> = { textbf: 'bold', textit: 'italic', emph: 'italic', texttt: 'code', underline: 'underline', uline: 'underline' };
 
 function pushText(out: JNode[], text: string, marks: Mark[]) {
   if (!text) return;
@@ -23,10 +23,20 @@ function pushText(out: JNode[], text: string, marks: Mark[]) {
   out.push(n);
 }
 
+/** Outer → inner nesting order when serializing marks. */
+const MARK_ORDER: Record<Mark['type'], number> = { link: -1, bold: 0, italic: 1, underline: 2, code: 3, textColor: 4, highlight: 5 };
 function sortMarks(marks: Mark[]): Mark[] {
-  const order = { bold: 0, italic: 1, code: 2 } as const;
-  return [...marks].sort((a, b) => order[a.type] - order[b.type]);
+  return [...marks].sort((a, b) => MARK_ORDER[a.type] - MARK_ORDER[b.type]);
 }
+
+function pushInner(out: JNode[], inner: JNode[]) {
+  for (const n of inner) {
+    if (n.type === 'text') pushText(out, n.text!, n.marks ?? []);
+    else out.push(n);
+  }
+}
+
+const HEX = /^[0-9A-Fa-f]{6}$/;
 
 /**
  * Parse inline LaTeX. Whitespace runs (including newlines) collapse to one space.
@@ -118,12 +128,49 @@ export function parseInline(s: string, marks: Mark[] = []): JNode[] {
         if (a.arg !== null) {
           flush();
           const m: Mark = { type: MARK_COMMANDS[name] };
-          const inner = parseInline(a.arg, sortMarks([...marks.filter((x) => x.type !== m.type), m]));
-          for (const n of inner) {
-            if (n.type === 'text') pushText(out, n.text!, n.marks ?? []);
-            else out.push(n);
-          }
+          pushInner(out, parseInline(a.arg, sortMarks([...marks.filter((x) => x.type !== m.type), m])));
           i = a.end; continue;
+        }
+      }
+      if (name === 'textcolor' && !cmd.star) {
+        // \textcolor{name}{text} or \textcolor[HTML]{RRGGBB}{text}
+        const a = readArgs(s, cmd.nameEnd, 1);
+        const model = a.opts[0];
+        if (a.arg !== null && (!model || model === 'HTML')) {
+          const b = readArgs(s, a.end, 0);
+          if (b.arg !== null && b.optRaw === '' && (model !== 'HTML' || HEX.test(a.arg.trim()))) {
+            flush();
+            const m: Mark = { type: 'textColor', attrs: { color: model === 'HTML' ? a.arg.trim().toUpperCase() : a.arg.trim() } };
+            pushInner(out, parseInline(b.arg, sortMarks([...marks.filter((x) => x.type !== 'textColor'), m])));
+            i = b.end; continue;
+          }
+        }
+      }
+      if ((name === 'href' || name === 'url') && !cmd.star) {
+        const a = readArgs(s, cmd.nameEnd, 0);
+        if (a.arg !== null && a.optRaw === '') {
+          const href = a.arg.trim().replace(/\\([%#&_~])/g, '$1');
+          if (name === 'url') {
+            flush();
+            pushText(out, href, sortMarks([...marks.filter((x) => x.type !== 'link'), { type: 'link', attrs: { href } }]));
+            i = a.end; continue;
+          }
+          const b = readArgs(s, a.end, 0);
+          if (b.arg !== null && b.optRaw === '') {
+            flush();
+            pushInner(out, parseInline(b.arg, sortMarks([...marks.filter((x) => x.type !== 'link'), { type: 'link', attrs: { href } }])));
+            i = b.end; continue;
+          }
+        }
+      }
+      if (name === 'quirehl' && !cmd.star) {
+        const a = readArgs(s, cmd.nameEnd, 0);
+        const b = a.arg !== null ? readArgs(s, a.end, 0) : null;
+        if (a.arg !== null && b && b.arg !== null && HEX.test(a.arg.trim())) {
+          flush();
+          const m: Mark = { type: 'highlight', attrs: { color: a.arg.trim().toUpperCase() } };
+          pushInner(out, parseInline(b.arg, sortMarks([...marks.filter((x) => x.type !== 'highlight'), m])));
+          i = b.end; continue;
         }
       }
       if (CITE_COMMANDS.has(name)) {
@@ -213,7 +260,27 @@ export function escapeText(t: string): string {
 /** Marker used for line-break opportunities while wrapping (spaces in plain text only). */
 export const BREAK = '\u0001';
 
-const MARK_CMD: Record<Mark['type'], string> = { bold: 'textbf', italic: 'textit', code: 'texttt' };
+function wrapMark(m: Mark, t: string): string {
+  switch (m.type) {
+    case 'bold': return `\\textbf{${t}}`;
+    case 'italic': return `\\textit{${t}}`;
+    case 'underline': return `\\underline{${t}}`;
+    case 'code': return `\\texttt{${t}}`;
+    case 'textColor': {
+      const c = String(m.attrs?.color ?? '').replace(/^#/, '');
+      return HEX.test(c) ? `\\textcolor[HTML]{${c.toUpperCase()}}{${t}}` : c ? `\\textcolor{${c}}{${t}}` : t;
+    }
+    case 'link': {
+      const href = String(m.attrs?.href ?? '').replace(/([%#])/g, '\\$1');
+      return t === escapeText(String(m.attrs?.href ?? '')) ? `\\url{${String(m.attrs?.href ?? '')}}` : `\\href{${href}}{${t}}`;
+    }
+    case 'highlight': {
+      const c = String(m.attrs?.color ?? 'FFF176').replace(/^#/, '');
+      return `\\quirehl{${HEX.test(c) ? c.toUpperCase() : 'FFF176'}}{${t}}`;
+    }
+    default: return t;
+  }
+}
 
 export function serializeInline(nodes: JNode[] | undefined, breakable = false): string {
   if (!nodes) return '';
@@ -223,8 +290,8 @@ export function serializeInline(nodes: JNode[] | undefined, breakable = false): 
       case 'text': {
         let t = escapeText(n.text ?? '');
         if (breakable) t = t.replace(/ /g, BREAK);
-        const ms = sortMarks((n.marks ?? []).filter((m) => MARK_CMD[m.type]));
-        for (let k = ms.length - 1; k >= 0; k--) t = `\\${MARK_CMD[ms[k].type]}{${t}}`;
+        const ms = sortMarks((n.marks ?? []).filter((m) => MARK_ORDER[m.type] !== undefined));
+        for (let k = ms.length - 1; k >= 0; k--) t = wrapMark(ms[k], t);
         out += t;
         break;
       }

@@ -122,3 +122,20 @@ describe('inline parser', () => {
     expect(serializeInline([{ type: 'text', text: 'a_b & c% {d} ~ \\' }])).toBe(String.raw`a\_b \& c\% \{d\} \textasciitilde{} \textbackslash{}`);
   });
 });
+
+describe('rich inline marks', () => {
+  it('round-trips underline, colour, highlight and links', () => {
+    const src = String.raw`A \underline{u} \textcolor[HTML]{1E4290}{blue \textbf{b}} \quirehl{FFF176}{hi} \textcolor{red}{r} \href{https://x.org/a_b}{site} \url{https://y.org}.`;
+    const n = parseInline(src);
+    expect(n.find((x) => x.marks?.some((m) => m.type === 'underline'))?.text).toBe('u');
+    expect(n.find((x) => x.marks?.some((m) => m.type === 'highlight'))?.marks?.[0].attrs).toEqual({ color: 'FFF176' });
+    const out = serializeInline(n);
+    expect(out).toContain('\\underline{u}');
+    expect(out).toContain('\\textcolor[HTML]{1E4290}{blue }');
+    expect(out).toContain('\\textbf{\\textcolor[HTML]{1E4290}{b}}');
+    expect(out).toContain('\\quirehl{FFF176}{hi}');
+    expect(out).toContain('\\textcolor{red}{r}');
+    expect(out).toContain('\\href{https://x.org/a_b}{site}');
+    expect(out).toContain('\\url{https://y.org}');
+  });
+});

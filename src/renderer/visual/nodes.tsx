@@ -3,7 +3,8 @@ import { Extension, Node, mergeAttributes, nodeInputRule } from '@tiptap/core';
 import { NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Heading from '@tiptap/extension-heading';
-import CodeBlock from '@tiptap/extension-code-block';
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import { createLowlight, common } from 'lowlight';
 import Placeholder from '@tiptap/extension-placeholder';
 import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
@@ -16,8 +17,13 @@ import { getState, useStore, refreshBlock, gotoSource, mainFile, mainBlockLines,
 import { Refresh, Link } from '../components/Icons';
 import { loadPdfCached, renderPage } from '../pdf';
 import { parseInline } from '../../shared/latex/inline';
+import { TextColor, QuireHighlight } from './marks';
+import { TableBlock, QTable, QTableRow, QTableHeader, QTableCell } from './table';
+import { Find } from './find';
+import { Comments } from './comments';
+import { followCite, followLabel, followUrl } from './navigate';
 
-const META_TYPES = ['paragraph', 'heading', 'bulletList', 'orderedList', 'mathBlock', 'generatedBlock', 'figureBlock', 'calloutBlock', 'codeBlock', 'pageBreak', 'rawBlock'];
+const META_TYPES = ['paragraph', 'heading', 'bulletList', 'orderedList', 'mathBlock', 'generatedBlock', 'figureBlock', 'calloutBlock', 'codeBlock', 'pageBreak', 'rawBlock', 'tableBlock'];
 
 export const BlockMeta = Extension.create({
   name: 'blockMeta',
@@ -136,7 +142,10 @@ function atom(name: string, opts: { inline?: boolean; attrs: Record<string, unkn
       delete a.src; delete a.sig; delete a.gap;
       return [tag, mergeAttributes({ 'data-qtype': name, 'data-qattrs': JSON.stringify(a) })];
     },
-    addNodeView() { return ReactNodeViewRenderer(opts.view, opts.inline ? { as: 'span', className: 'inline-atom' } : {}); },
+    // Inline chips hold no inputs, so ProseMirror handles all their events. Without this
+    // a drag that starts on (or contains) a chip became a native DOM drag and dropped the
+    // chip's rendered text ("Table 5.3") instead of the \autoref node.
+    addNodeView() { return ReactNodeViewRenderer(opts.view, opts.inline ? { as: 'span', className: 'inline-atom', stopEvent: () => false } : {}); },
     addInputRules() {
       if (!opts.inputRule) return [];
       return [nodeInputRule({ find: opts.inputRule, type: this.type, getAttributes: opts.inputAttrs })];
@@ -162,7 +171,8 @@ function MathBlockView(props: ReactNodeViewProps) {
   const r = texToHtml(body || '\\square', true);
   const num = numFrom(props);
   return (
-    <NodeViewWrapper className={`eq ${r.error ? 'has-err' : ''}`} data-drag-handle="" title={r.error ? `KaTeX preview: ${r.error}` : 'Select to edit the equation'}>
+    <NodeViewWrapper className={`eq ${r.error ? 'has-err' : ''}`} data-drag-handle="" title={r.error ? `KaTeX preview: ${r.error}` : 'Click to edit, double-click for the large editor'}
+      onDoubleClick={() => { const pos = typeof props.getPos === 'function' ? props.getPos() : undefined; if (pos !== undefined) setState({ equationModal: { pos, inline: false } }); }}>
       <div className="grow" dangerouslySetInnerHTML={{ __html: r.html }} />
       <span className="eqnum">{num ? `(${num})` : ''}</span>
     </NodeViewWrapper>
@@ -345,7 +355,8 @@ function PageBreakView(props: ReactNodeViewProps) {
 
 function InlineMathView(props: ReactNodeViewProps) {
   const r = texToHtml(props.node.attrs.latex || '\\square', false);
-  return <NodeViewWrapper as="span" className="chip-math" title={r.error ?? props.node.attrs.latex} dangerouslySetInnerHTML={{ __html: r.html }} />;
+  return <NodeViewWrapper as="span" className="chip-math" title={r.error ?? props.node.attrs.latex} dangerouslySetInnerHTML={{ __html: r.html }}
+    onDoubleClick={() => { const pos = typeof props.getPos === 'function' ? props.getPos() : undefined; if (pos !== undefined) setState({ equationModal: { pos, inline: true } }); }} />;
 }
 
 function CitationView(props: ReactNodeViewProps) {
@@ -356,7 +367,7 @@ function CitationView(props: ReactNodeViewProps) {
   if (missing.length) return <NodeViewWrapper as="span" className="chip-bad" title="Not found in the bibliography">{keys.join(', ')} ?</NodeViewWrapper>;
   const ents = keys.map((k) => bib.find((b) => b.key === k)!);
   const txt = ents.map((e) => `${shortAuthor(e.author, e.corporate) || e.key}${cmd.startsWith('citet') || cmd === 'textcite' ? ` (${e.year ?? 'n.d.'})` : ` ${e.year ?? ''}`}`).join('; ');
-  return <NodeViewWrapper as="span" className="chip-cite" title={ents.map((e) => e.title).join('\n')}>{cmd.startsWith('citet') || cmd === 'textcite' ? txt : `[${txt.trim()}]`}</NodeViewWrapper>;
+  return <NodeViewWrapper as="span" className="chip-cite" title={`${ents.map((e) => e.title).join('\n')}\nCtrl+click to open the source`}>{cmd.startsWith('citet') || cmd === 'textcite' ? txt : `[${txt.trim()}]`}</NodeViewWrapper>;
 }
 
 function CrossRefView(props: ReactNodeViewProps) {
@@ -364,7 +375,7 @@ function CrossRefView(props: ReactNodeViewProps) {
   const key: string = props.node.attrs.key;
   const info = labels.get(key);
   if (!info) return <NodeViewWrapper as="span" className="chip-bad" title="No label with this name">{key} ?</NodeViewWrapper>;
-  return <NodeViewWrapper as="span" className="chip-ref" title={`\\${props.node.attrs.cmd}{${key}}`}>{refDisplay(props.node.attrs.cmd, info)}</NodeViewWrapper>;
+  return <NodeViewWrapper as="span" className="chip-ref" title={`\\${props.node.attrs.cmd}{${key}} — Ctrl+click to go there`}>{refDisplay(props.node.attrs.cmd, info)}</NodeViewWrapper>;
 }
 
 function FootnoteView(props: ReactNodeViewProps) {
@@ -424,7 +435,10 @@ const QHeading = Heading.extend({
   },
 }).configure({ levels: [1, 2, 3] });
 
-const QCodeBlock = CodeBlock.extend({
+const lowlight = createLowlight(common);
+lowlight.registerAlias({ python: ['Python', 'py'], r: ['R'], sql: ['SQL'], cpp: ['C++', 'cpp'], java: ['Java'], bash: ['Bash', 'sh'], latex: ['TeX', 'LaTeX'] });
+
+const QCodeBlock = CodeBlockLowlight.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -433,11 +447,39 @@ const QCodeBlock = CodeBlock.extend({
     };
   },
   renderHTML({ node }) {
-    return ['pre', { 'data-language': node.attrs.language || null }, ['code', {}, 0]];
+    return ['pre', { 'data-language': node.attrs.language || null, spellcheck: 'false' }, ['code', { class: node.attrs.language ? `language-${String(node.attrs.language).toLowerCase()}` : null, spellcheck: 'false' }, 0]];
   },
-});
+}).configure({ lowlight, defaultLanguage: null });
 
 const PROTECTED = new Set(['rawBlock', 'generatedBlock', 'mathBlock', 'figureBlock', 'pageBreak']);
+
+/** Ctrl+click follows cross-references, citations and links. */
+export const FollowLinks = Extension.create({
+  name: 'followLinks',
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      props: {
+        handleClickOn: (_view, _pos, node, _nodePos, event) => {
+          if (!(event.ctrlKey || event.metaKey)) return false;
+          if (node.type.name === 'crossRef') { void followLabel(node.attrs.key); return true; }
+          if (node.type.name === 'citation') { void followCite(String(node.attrs.keys).split(',')[0].trim()); return true; }
+          if (node.type.name === 'inlineRaw') {
+            const m = /\\(?:url|href)\{([^}]+)\}/.exec(node.attrs.latex);
+            if (m) { followUrl(m[1]); return true; }
+          }
+          return false;
+        },
+        handleClick: (view, pos, event) => {
+          if (!(event.ctrlKey || event.metaKey)) return false;
+          const $p = view.state.doc.resolve(pos);
+          const link = $p.marks().find((m) => m.type.name === 'link') ?? view.state.doc.nodeAt(pos)?.marks.find((m) => m.type.name === 'link');
+          if (link) { followUrl(link.attrs.href); return true; }
+          return false;
+        },
+      },
+    })];
+  },
+});
 
 /**
  * Typing while a block atom (raw LaTeX, generated table, equation…) is selected would
@@ -478,11 +520,16 @@ export function extensions() {
   return [
     AppKeys,
     ProtectAtoms,
-    StarterKit.configure({ heading: false, codeBlock: false, blockquote: false, horizontalRule: false, strike: false, underline: false, link: false }),
+    StarterKit.configure({ heading: false, codeBlock: false, blockquote: false, horizontalRule: false, strike: false, link: { openOnClick: false, autolink: true, linkOnPaste: true, HTMLAttributes: { rel: null, target: null, class: 'qlink' } } }),
     QHeading,
     QCodeBlock,
+    TextColor, QuireHighlight,
+    TableBlock, QTable, QTableRow, QTableHeader, QTableCell,
     BlockMeta,
     Numbering,
+    Find,
+    Comments,
+    FollowLinks,
     MathBlock, GeneratedBlock, FigureBlock, RawBlock, PageBreak, CalloutBlock,
     InlineMath, Citation, CrossRef, Footnote, InlineRaw,
     Placeholder.configure({ placeholder: 'Write here, or use Insert for tables, equations and test results…' }),

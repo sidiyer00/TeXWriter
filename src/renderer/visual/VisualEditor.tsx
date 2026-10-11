@@ -4,7 +4,9 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { extensions, numberingKey, syncKey } from './nodes';
 import { editorRef } from './editorRef';
-import { getState, mainFile, parsedMain, setFileText, setFlushHook, setState, subscribe, useStore } from '../store';
+import { autoPanel, getState, isRichSelection, mainFile, parsedMain, setFileText, setFlushHook, setState, subscribe, useStore } from '../store';
+import { commentsKey } from './comments';
+import { visualContextMenu } from './contextMenu';
 import { serializeDocument, toDocJson, parseDocument } from '../../shared/latex/blocks';
 import { lineOf } from '../../shared/latex/scan';
 import type { JNode } from '../../shared/latex/model';
@@ -96,11 +98,14 @@ export function VisualEditor() {
     let inline: { type: string; attrs: Record<string, any>; pos: number } | null = null;
     if (selection instanceof NodeSelection && selection.node.isInline) inline = { type: selection.node.type.name, attrs: { ...selection.node.attrs }, pos: selection.from };
     const lines = editorBlockLines()[index] ?? null;
-    setState({ selection: { index, pos, type: node.type.name, attrs: { ...node.attrs }, inline }, syncLines: lines });
+    const next = { index, pos, type: node.type.name, attrs: { ...node.attrs }, inline };
+    setState({ selection: next, syncLines: lines });
+    autoPanel(isRichSelection(next, ed.isActive('table')));
   }
 
   useEffect(() => {
     editorRef.current = editor;
+    setState((s) => ({ editorTick: s.editorTick + 1 }));
     flushVisual = () => { window.clearTimeout(updateTimer.current); pending.current?.(); };
     setFlushHook(flushVisual);
     return () => {
@@ -143,6 +148,19 @@ export function VisualEditor() {
     });
   }, [editor]);
 
+  // comment highlights follow the comment list, the active thread and the draft
+  useEffect(() => {
+    let last = '';
+    return subscribe(() => {
+      const s = getState();
+      const sig = `${s.comments.length}|${s.comments.map((t) => `${t.id}${t.resolved ? 1 : 0}`).join()}|${s.activeComment}|${s.draftComment?.from}-${s.draftComment?.to}`;
+      if (sig === last) return;
+      last = sig;
+      const ed = editorRef.current;
+      if (ed && !ed.isDestroyed) ed.view.dispatch(ed.state.tr.setMeta(commentsKey, true));
+    });
+  }, [editor]);
+
   // highlight the block under the source cursor
   const syncIndex = useStore((s) => s.syncIndex);
   useEffect(() => { if (syncIndex !== null) scrollToBlock(syncIndex); }, [syncIndex]);
@@ -162,7 +180,12 @@ export function VisualEditor() {
     );
   }
   return (
-    <div className="doc-canvas" onMouseDown={(e) => { if (e.target === e.currentTarget) editor?.commands.focus('end'); }}>
+    <div className="doc-canvas" onMouseDown={(e) => { if (e.target === e.currentTarget) editor?.commands.focus('end'); }}
+      onContextMenu={(e) => {
+        if (!editor || !(e.target as HTMLElement).closest('.ProseMirror')) return;
+        if ((e.target as HTMLElement).closest('input, textarea, select, .blk-actions')) return;
+        visualContextMenu(editor, e.nativeEvent);
+      }}>
       <article className="page">
         <div className="page-head" aria-hidden="true"><span>{theme?.headerLeft || project?.manifest.name}</span><span>{theme?.headerRight}</span></div>
         <EditorContent editor={editor} />

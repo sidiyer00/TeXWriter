@@ -2,13 +2,50 @@
 import { useEffect, useRef } from 'react';
 import { Annotation, EditorState, StateEffect, StateField, RangeSetBuilder, Compartment } from '@codemirror/state';
 import { EditorView, Decoration, DecorationSet, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
-import { StreamLanguage, syntaxHighlighting, HighlightStyle, bracketMatching } from '@codemirror/language';
+import { defaultKeymap, history, historyKeymap, indentWithTab, toggleComment, selectAll } from '@codemirror/commands';
+import { searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codemirror/search';
+import { StreamLanguage, syntaxHighlighting, HighlightStyle, bracketMatching, type StreamParser } from '@codemirror/language';
+import { closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { stex } from '@codemirror/legacy-modes/mode/stex';
+import { python } from '@codemirror/legacy-modes/mode/python';
+import { r as rMode } from '@codemirror/legacy-modes/mode/r';
+import { standardSQL } from '@codemirror/legacy-modes/mode/sql';
+import { yaml } from '@codemirror/legacy-modes/mode/yaml';
+import { toml } from '@codemirror/legacy-modes/mode/toml';
+import { shell } from '@codemirror/legacy-modes/mode/shell';
+import { javascript, json } from '@codemirror/legacy-modes/mode/javascript';
 import { tags as t } from '@lezer/highlight';
-import { allDiagnostics, getState, mainBlockLines, mainFile, setFileText, setState, useStore } from '../store';
+import { allDiagnostics, api, getState, mainBlockLines, mainFile, openContextMenu, setFileText, setState, useStore } from '../store';
 import { editorRef } from '../visual/editorRef';
+import { documentAutocomplete } from '../latexCompletions';
+import { followInSource } from '../visual/navigate';
+
+/** Pick a syntax mode from the file extension; LaTeX-family files get completions too. */
+function languageFor(file: string): { parser: StreamParser<unknown> | null; latex: boolean } {
+  const ext = file.toLowerCase().split('.').pop() ?? '';
+  const m: Record<string, StreamParser<any>> = { py: python, r: rMode, sql: standardSQL, yml: yaml, yaml, toml, sh: shell, bash: shell, js: javascript, ts: javascript, json };
+  if (['tex', 'sty', 'cls', 'def', 'cfg', 'ltx', 'dtx', 'bib', 'bbx', 'cbx', 'bst'].includes(ext)) return { parser: stex as StreamParser<unknown>, latex: ext !== 'bib' && ext !== 'bst' };
+  return { parser: m[ext] ?? null, latex: false };
+}
+
+export function sourceContextMenu(v: EditorView, e: { clientX: number; clientY: number }, file: string) {
+  const sel = v.state.selection.main;
+  const head = sel.head;
+  const line = v.state.doc.lineAt(head);
+  const ro = v.state.readOnly;
+  openContextMenu(e, [
+    { label: 'Cut', shortcut: 'Ctrl+X', disabled: sel.empty || ro, run: () => { v.focus(); void api.editCommand('cut'); } },
+    { label: 'Copy', shortcut: 'Ctrl+C', disabled: sel.empty, run: () => { v.focus(); void api.editCommand('copy'); } },
+    { label: 'Paste', shortcut: 'Ctrl+V', disabled: ro, run: () => { v.focus(); void api.editCommand('paste'); } },
+    { label: 'Select all', shortcut: 'Ctrl+A', run: () => { v.focus(); selectAll(v); } },
+    { separator: true },
+    { label: 'Go to definition / follow', shortcut: 'F12 · Ctrl+click', run: () => void followInSource(line.text, head - line.from, file) },
+    { label: 'Toggle comment', shortcut: 'Ctrl+/', disabled: ro, run: () => { v.focus(); toggleComment(v); } },
+    { label: 'Find and replace', shortcut: 'Ctrl+F', run: () => { v.focus(); openSearchPanel(v); } },
+    { separator: true },
+    { label: 'Show in folder', run: () => { const r = getState().project?.root; if (r) void api.revealInFolder(`${r}/${file}`); } },
+  ]);
+}
 
 const hl = HighlightStyle.define([
   { tag: t.keyword, color: '#244C9D' },
@@ -72,14 +109,21 @@ export function SourceEditor({ file }: { file: string }) {
   useEffect(() => {
     if (!host.current) return;
     const initial = getState().files[file]?.text ?? '';
+    const lang = languageFor(file);
     const v = new EditorView({
       parent: host.current,
       state: EditorState.create({
         doc: initial,
         extensions: [
           lineNumbers(), highlightActiveLineGutter(), highlightActiveLine(), drawSelection(), history(), bracketMatching(), highlightSelectionMatches(),
-          StreamLanguage.define(stex), syntaxHighlighting(hl), EditorView.lineWrapping,
-          keymap.of([{ key: 'Mod-Enter', run: () => true, preventDefault: false }, { key: 'Mod-s', run: () => true }, indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+          ...(lang.parser ? [StreamLanguage.define(lang.parser)] : []), syntaxHighlighting(hl), EditorView.lineWrapping,
+          ...(lang.latex ? [documentAutocomplete()] : []), closeBrackets(),
+          keymap.of([
+            { key: 'Mod-Enter', run: () => true, preventDefault: false }, { key: 'Mod-s', run: () => true },
+            { key: 'F12', run: (v) => { const l = v.state.doc.lineAt(v.state.selection.main.head); void followInSource(l.text, v.state.selection.main.head - l.from, file); return true; } },
+            { key: 'Mod-h', run: (v) => { openSearchPanel(v); return true; } },
+            ...closeBracketsKeymap, ...completionKeymap, indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap,
+          ]),
           ro.current.of(EditorState.readOnly.of(readOnly)),
           linesField,
           EditorView.updateListener.of((u) => {
@@ -95,7 +139,25 @@ export function SourceEditor({ file }: { file: string }) {
               }
             }
           }),
-          EditorView.domEventHandlers({ focus: () => { editorRef.lastFocus = 'source'; } }),
+          EditorView.domEventHandlers({
+            focus: () => { editorRef.lastFocus = 'source'; },
+            mousedown: (e, v) => {
+              if (!(e.ctrlKey || e.metaKey) || e.button !== 0) return false;
+              const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
+              if (pos === null) return false;
+              const l = v.state.doc.lineAt(pos);
+              e.preventDefault();
+              void followInSource(l.text, pos - l.from, file);
+              return true;
+            },
+            contextmenu: (e, v) => {
+              const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
+              const sel = v.state.selection.main;
+              if (pos !== null && (sel.empty || pos < sel.from || pos > sel.to)) v.dispatch({ selection: { anchor: pos } });
+              sourceContextMenu(v, e, file);
+              return false;
+            },
+          }),
           EditorView.contentAttributes.of({ 'aria-label': `${file} source`, spellcheck: 'false' }),
         ],
       }),

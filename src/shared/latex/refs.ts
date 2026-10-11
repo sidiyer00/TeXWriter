@@ -2,7 +2,7 @@
 import type { JNode } from './model';
 import type { GeneratedBlockConfig } from '../types';
 
-export interface BibEntry { key: string; type: string; author?: string; year?: string; title?: string; corporate?: boolean }
+export interface BibEntry { key: string; type: string; author?: string; year?: string; title?: string; corporate?: boolean; url?: string; doi?: string }
 
 export function parseBib(bib: string): BibEntry[] {
   const out: BibEntry[] = [];
@@ -19,7 +19,7 @@ export function parseBib(bib: string): BibEntry[] {
       return fm ? (fm[2] ?? fm[3] ?? fm[4] ?? '').replace(/[{}]/g, '').replace(/\s+/g, ' ').trim() : undefined;
     };
     const corporate = /\bauthor\s*=\s*\{\s*\{[^{}]*\}\s*\}/i.test(body);
-    out.push({ key: m[2], type, author: field('author'), year: field('year'), title: field('title'), corporate });
+    out.push({ key: m[2], type, author: field('author'), year: field('year'), title: field('title'), corporate, url: field('url'), doi: field('doi') });
   }
   return out;
 }
@@ -91,6 +91,12 @@ export function numberDocument(doc: JNode, blocks: Record<string, GeneratedBlock
       numbers.set(index, num);
       if (a.label) labels.set(a.label, { label: a.label, kind: 'figure', number: num, title: a.caption ?? '' });
       child('figure', `Figure ${num}`, a.label);
+    } else if (n.type === 'tableBlock' && a.env !== 'none' && a.caption) {
+      tab++;
+      const num = `${within()}.${tab}`;
+      numbers.set(index, num);
+      if (a.label) labels.set(a.label, { label: a.label, kind: 'table', number: num, title: a.caption ?? '' });
+      child('table', `Table ${num}`, a.label);
     } else if (n.type === 'generatedBlock') {
       const cfg = blocks[a.id];
       if (cfg?.kind === 'table' || cfg?.kind === 'figure') {

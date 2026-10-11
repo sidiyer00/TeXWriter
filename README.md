@@ -30,7 +30,11 @@ npm run dist         # build release\Quire-Setup-0.1.0.exe
 | **Python 3.9+** | Running the sample test suite | Standard library only. Quire finds `python` on PATH; you can set a specific interpreter in Document setup → Compiler and tests. |
 | Git (optional) | Recording the commit on each run | |
 
-The Home screen's "This computer" panel shows what Quire found.
+The Home screen's "This computer" panel shows what Quire found; **Settings → LaTeX and Python**
+(Ctrl+,) lists every tool with its path, lets you point at a specific TeX bin folder or Python,
+and has **Detect again**. Quire also re-checks on its own when you switch back to it after
+installing MiKTeX (it reads the updated PATH from the registry, plus the usual MiKTeX/TeX Live
+install folders), so a fresh install is picked up without restarting.
 
 ## The workflow
 
@@ -94,7 +98,36 @@ writes this file for you. Print `QUIRE_PROGRESS <done>/<total> <label>` lines to
 the progress bar. A JUnit XML file (`{runDir}/junit.xml`, e.g. from
 `pytest --junitxml`) also works, but only for pass/fail status.
 
+## Editing
+
+- **Formatting**: bold, italic, underline (Ctrl+U), monospace, text colour and highlight
+  (`\textcolor`, `\quirehl` via soul), links (`\href`). The toolbar hides its least-used buttons
+  in **More** when the window is narrow instead of wrapping.
+- **Find and replace** (Ctrl+F / Ctrl+H): all matches highlighted, match case / whole word /
+  regex, Replace and Replace all (one undo step). In the LaTeX pane Ctrl+F uses CodeMirror's search.
+- **Follow references**: Ctrl+click (or F12) a cross-reference to jump to its target, a citation
+  to open its URL/DOI (or its BibTeX entry), a link to open it in the browser. Works in the
+  LaTeX pane on `\ref`, `\cite`, `\input`, `\includegraphics` and `\url`, and on links in the PDF.
+- **Tables**: Insert → Table (Ctrl+Alt+T) gives an editable table: rows/columns, merge and split
+  cells, header rows (several header rows with merged cells print as multi-level headers with
+  `\cmidrule`), cell colours (`\cellcolor`), column alignment, and five styles (booktabs, grid,
+  minimal, striped, plain). Existing `tabular` environments open in the same editor when Quire
+  can represent them; anything else stays an editable LaTeX block.
+- **Equations**: the properties panel and the large editor (double-click an equation, or
+  Maximize) suggest LaTeX commands as you type (`\su` → `\sum_{}^{}`), with a symbol palette.
+- **Comments**: select text, Ctrl+Alt+M or right-click → New comment. Threads support replies,
+  edits, resolve/reopen. They live in `quire-comments.json` in the project folder, so anyone
+  opening the same folder with Quire sees them; anchors survive edits made in either view.
+- **Files**: the Files tab in the navigator shows the whole project; click a `.tex`, `.sty`, `.cls`,
+  `.bib` or script to open it in its own tab (Ctrl+O to search). Only the main file is open by default.
+- **Right-click** menus everywhere (spelling suggestions, formatting, table operations, follow
+  reference, show in source; file tree; source tabs). The **properties panel** opens itself for
+  equations, tables, figures and references and closes again when you leave them; pin it with
+  Ctrl+Alt+P.
+
 ## Keyboard
+
+Press **F1** (or Settings → Keyboard shortcuts) for the full list. Shortcuts are fixed. The main ones:
 
 | Shortcut | Action |
 |---|---|
@@ -102,6 +135,13 @@ the progress bar. A JUnit XML file (`{runDir}/junit.xml`, e.g. from
 | Ctrl+Enter | Compile |
 | Ctrl+Shift+T | Run tests |
 | Ctrl+S | Save now (autosave is on) |
+| Ctrl+F / Ctrl+H | Find / find and replace |
+| Ctrl+B / I / U | Bold / italic / underline |
+| Ctrl+M / Ctrl+Shift+M | Inline math / display equation |
+| Ctrl+Alt+T | Insert table |
+| Ctrl+Alt+M | New comment |
+| Ctrl+click, F12 | Follow reference, citation or link |
+| Ctrl+O | Open a file in the project |
 | F8 / Shift+F8 | Next / previous issue |
 | Ctrl+\ | Collapse navigator |
 | Double-click PDF | Jump to source (SyncTeX) |
@@ -123,10 +163,12 @@ quire/
 the full workflow: sample → run → insert → split edit → compile → setup → round-trip
 edits. It writes screenshots to `e2e-shots/`.
 
-## Known limits (v0.1)
+## Known limits (v0.2)
 
-- The visual editor does not model tables written by hand or multi-column layouts. They
-  stay editable as LaTeX blocks. Insert static tables via Table, or generated ones from a run.
+- Hand-written tables using `tabularx`, `longtable`, `p{}` widths with nested environments, or
+  multi-column page layouts stay LaTeX blocks (still editable in source).
+- Comments are shared through the project folder (last writer wins if two people edit the same
+  comment file at the same moment); there is no live co-editing.
 - The in-editor equation preview uses KaTeX. A few LaTeX-only macros show a preview error
   but still compile.
 - Package installs are left to MiKTeX/TeX Live. When a theme font is missing, Quire falls back to

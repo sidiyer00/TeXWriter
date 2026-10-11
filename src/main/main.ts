@@ -1,5 +1,5 @@
 // Electron main process: window, protocol for project files, and the IPC API.
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, screen, shell, session } from 'electron';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -12,7 +12,9 @@ import {
 import { compile, cancelCompile, synctexEdit, synctexView } from './compile';
 import { cancelRun, listRuns, loadRun, runTests } from './runs';
 import { pdfPath, provenance, writeBundle } from './exporter';
-import { toolchain } from './toolchain';
+import { refreshRegistryDirs, toolchain } from './toolchain';
+import { getSettings, saveSettings } from './settings';
+import type { AppSettings } from '../shared/types';
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'quire-file', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: false } },
@@ -46,7 +48,15 @@ function createWindow() {
       spellcheck: true,
     },
   });
-  win.once('ready-to-show', () => win?.show());
+  win.once('ready-to-show', () => {
+    win?.show();
+    win?.webContents.setZoomFactor(getSettings().uiZoom || 1);
+  });
+  installTaskbarFix(win);
+  win.on('focus', () => send('window-focus', null));
+  win.webContents.on('context-menu', (_e, params) => {
+    send('spell', { word: params.misspelledWord ?? '', suggestions: params.dictionarySuggestions ?? [], at: Date.now() });
+  });
   let closing = false;
   win.on('close', (e) => {
     if (closing || !win) return;
@@ -66,6 +76,39 @@ function createWindow() {
   });
   if (DEV_URL) win.loadURL(DEV_URL);
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+}
+
+/**
+ * A window with a hidden title bar that is maximized covers the whole monitor when the
+ * taskbar is set to auto-hide, and Windows then treats the app as full screen and never
+ * reveals the taskbar. Keep a 1-px strip free on the taskbar's edge instead.
+ */
+function installTaskbarFix(w: BrowserWindow) {
+  if (process.platform !== 'win32') return;
+  let restore: Electron.Rectangle | null = null;
+  let pseudo = false;
+  let lastNormal = w.getBounds();
+  w.on('resize', () => { if (!w.isMaximized() && !pseudo) lastNormal = w.getBounds(); });
+  w.on('move', () => { if (!w.isMaximized() && !pseudo) lastNormal = w.getBounds(); });
+  w.on('maximize', () => {
+    const d = screen.getDisplayMatching(w.getBounds());
+    const autoHide = d.workArea.height === d.bounds.height && d.workArea.width === d.bounds.width;
+    if (!autoHide) return;
+    if (pseudo && restore) {
+      // second maximize request while pseudo-maximized acts as "restore"
+      pseudo = false;
+      w.unmaximize();
+      w.setBounds(restore);
+      return;
+    }
+    restore = lastNormal;
+    pseudo = true;
+    w.unmaximize();
+    const wa = d.workArea;
+    w.setBounds({ x: wa.x, y: wa.y, width: wa.width, height: wa.height - 1 });
+  });
+  w.on('will-resize', () => { pseudo = false; });
+  w.on('will-move', () => { pseudo = false; });
 }
 
 function buildMenu() {
@@ -99,6 +142,21 @@ function assertRoot(root: string) {
 
 function registerIpc() {
   handle('toolchain', () => toolchain(true));
+  handle('redetectTools', async () => { await refreshRegistryDirs(); return toolchain(true); });
+  handle('getSettings', () => getSettings());
+  handle('saveSettings', (patch: Partial<AppSettings>) => {
+    const s2 = saveSettings(patch);
+    if (patch.uiZoom && win) win.webContents.setZoomFactor(patch.uiZoom);
+    if (patch.spellLanguage) try { session.defaultSession.setSpellCheckerLanguages([patch.spellLanguage]); } catch { /* unsupported */ }
+    if (patch.spellcheck !== undefined) session.defaultSession.setSpellCheckerEnabled(patch.spellcheck);
+    if (patch.texBinDir !== undefined || patch.pythonPath !== undefined) toolchain(true);
+    return s2;
+  });
+  handle('replaceMisspelling', (w: string) => win?.webContents.replaceMisspelling(w));
+  handle('addToDictionary', (w: string) => { session.defaultSession.addWordToSpellCheckerDictionary(w); });
+  handle('editCommand', (cmd: 'cut' | 'copy' | 'paste' | 'selectAll' | 'undo' | 'redo') => { const wc = win?.webContents; if (wc) wc[cmd](); });
+  handle('setZoom', (f: number) => { win?.webContents.setZoomFactor(f); saveSettings({ uiZoom: f }); });
+  handle('appInfo', () => ({ version: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node, userData: app.getPath('userData') }));
   handle('recents', () => readRecents());
   handle('removeRecent', (root: string) => removeRecent(root));
   handle('chooseDirectory', async (title: string) => {
@@ -209,6 +267,7 @@ function registerIpc() {
   });
   handle('revealInFolder', (abs: string) => shell.showItemInFolder(abs));
   handle('openExternal', (url: string) => { if (/^https?:\/\//.test(url)) return shell.openExternal(url); });
+  handle('openPath', async (abs: string) => { const err = await shell.openPath(path.normalize(abs)); if (err) throw new Error(err); });
 }
 
 const selfWrites = new Map<string, number>();
@@ -237,6 +296,9 @@ app.whenReady().then(() => {
   }
   buildMenu();
   registerIpc();
+  const st = getSettings();
+  try { session.defaultSession.setSpellCheckerEnabled(st.spellcheck); session.defaultSession.setSpellCheckerLanguages([st.spellLanguage || 'en-US']); } catch { /* not on all platforms */ }
+  void refreshRegistryDirs().then(() => toolchain(true));
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
