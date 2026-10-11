@@ -5,8 +5,10 @@ Moving from Cowork to Claude Code. Project conventions and gotchas: `CLAUDE.md`.
 ## Where things are
 - Repo: `C:\Users\sidiy\Documents\Projects\Latex_Editor\quire` (git, branch `master`,
   HEAD = "v0.2: …" on top of "Quire 0.1.0"). No remote configured.
-- Installer: `release\Quire-Setup-0.2.0.exe`
-  (sha256 `0dd88a2b7665d88db6561c783bc1a67b3b331dd5e9424e580882711740ae4273`). Old 0.1.0 installer also there.
+- Installer: `release\Quire-Setup-0.2.1.exe`
+  (sha256 `46f1ed1d4f25234fc702f2262ebff2b321f6cd3eb95cf497018302119535b44a`, unsigned). 0.2.0 and 0.1.0 installers also there.
+- 0.2.1 = 0.2.0 + Windows fixes: menus no longer clipped, click-only submenus, right panel opens
+  only on request, Projects-folder setting (keeps files out of OneDrive), no desktop shortcut.
 - `node_modules/` is not in the folder: run `npm install` first.
 - Git note: the folder was synced with `core.filemode=false` (Windows mount showed mode-only diffs).
 
