@@ -15,6 +15,8 @@ const app = await electron.launch({
   args: ['.', '--no-sandbox', `--user-data-dir=${path.join(home, 'userdata')}`],
   env: { ...process.env, HOME: home, XDG_DOCUMENTS_DIR: path.join(home, 'Documents'), QUIRE_SAMPLE_PACE: '0.01' },
 });
+// HOME/XDG only redirect Documents on Linux; on Windows force it so runs never touch the real folder.
+await app.evaluate(({ app }, d) => app.setPath('documents', d), path.join(home, 'Documents'));
 const win = await app.firstWindow();
 const errors = [];
 win.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
