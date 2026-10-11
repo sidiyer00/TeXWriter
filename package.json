@@ -1,0 +1,90 @@
+{
+  "name": "quire",
+  "productName": "Quire",
+  "version": "0.1.0",
+  "description": "Model documentation and validation report studio: visual editing with live LaTeX control, linked test results, and reproducible PDF builds.",
+  "author": "Sid Iyer",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build:main": "node scripts/build-main.mjs",
+    "build:renderer": "vite build",
+    "build": "npm run typecheck && npm run build:main && npm run build:renderer",
+    "start": "electron .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "e2e": "node scripts/e2e.mjs",
+    "dist": "npm run build && electron-builder --win nsis",
+    "dist:dir": "npm run build && electron-builder --dir"
+  },
+  "dependencies": {
+    "adm-zip": "0.5.16"
+  },
+  "devDependencies": {
+    "@codemirror/commands": "^6.8.0",
+    "@codemirror/language": "^6.11.0",
+    "@codemirror/legacy-modes": "^6.5.0",
+    "@codemirror/search": "^6.5.0",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.38.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@fontsource/source-serif-4": "^5.3.1",
+    "@lezer/highlight": "^1.2.5",
+    "@tiptap/core": "^3.4.0",
+    "@tiptap/extension-placeholder": "^3.4.0",
+    "@tiptap/pm": "^3.4.0",
+    "@tiptap/react": "^3.4.0",
+    "@tiptap/starter-kit": "^3.4.0",
+    "@types/adm-zip": "^0.5.7",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "38.8.6",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.25.10",
+    "katex": "^0.16.22",
+    "pdfjs-dist": "^5.4.0",
+    "playwright-core": "^1.55.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.1.0",
+    "vitest": "^3.2.4"
+  },
+  "build": {
+    "appId": "com.quire.reportstudio",
+    "productName": "Quire",
+    "directories": {
+      "output": "release",
+      "buildResources": "build-resources"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "resources"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "Quire-Setup-${version}.${ext}",
+      "icon": "build-resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "publish": null
+  }
+}

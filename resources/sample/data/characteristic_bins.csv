@@ -1,0 +1,10 @@
+characteristic,bin,dev_share,cur_share
+leverage_ratio,bin_1,0.22,0.135
+leverage_ratio,bin_2,0.31,0.26
+leverage_ratio,bin_3,0.27,0.29
+leverage_ratio,bin_4,0.14,0.198
+leverage_ratio,bin_5,0.06,0.117
+interest_cover,bin_1,0.12,0.14
+interest_cover,bin_2,0.25,0.27
+interest_cover,bin_3,0.33,0.32
+interest_cover,bin_4,0.3,0.27

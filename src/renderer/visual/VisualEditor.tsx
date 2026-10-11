@@ -1,0 +1,172 @@
+// The word-processor view of the main .tex file, kept in sync with the source.
+import { useEffect, useRef } from 'react';
+import { useEditor, EditorContent } from '@tiptap/react';
+import { NodeSelection, TextSelection } from '@tiptap/pm/state';
+import { extensions, numberingKey, syncKey } from './nodes';
+import { editorRef } from './editorRef';
+import { getState, mainFile, parsedMain, setFileText, setFlushHook, setState, subscribe, useStore } from '../store';
+import { serializeDocument, toDocJson, parseDocument } from '../../shared/latex/blocks';
+import { lineOf } from '../../shared/latex/scan';
+import type { JNode } from '../../shared/latex/model';
+
+/** Source line range for each top-level node of the editor's current doc. */
+export function editorBlockLines(): ([number, number] | null)[] {
+  const ed = editorRef.current;
+  if (!ed) return [];
+  const p = parsedMain();
+  const { tex, ranges } = serializeDocument(p.prefix, ed.getJSON() as JNode, p.suffix, p.leading);
+  return ranges.map((r) => (r ? [lineOf(tex, r[0]), lineOf(tex, Math.max(r[0], r[1] - 1))] : null));
+}
+
+/** Write any pending visual edit to the store immediately. */
+export let flushVisual: () => void = () => {};
+
+export function scrollToBlock(index: number, highlight = true) {
+  const ed = editorRef.current;
+  if (!ed || index < 0 || index >= ed.state.doc.childCount) return;
+  let pos = 0;
+  for (let i = 0; i < index; i++) pos += ed.state.doc.child(i).nodeSize;
+  const dom = ed.view.nodeDOM(pos) as HTMLElement | null;
+  dom?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  if (highlight) ed.view.dispatch(ed.state.tr.setMeta(syncKey, index));
+}
+
+/**
+ * ProseMirror starts with a NodeSelection when the document begins with an atom
+ * (\\maketitle, a generated table…). Focusing the editor would then scroll to and
+ * select that atom, so start in the first text block instead.
+ */
+function placeCaretAtFirstText(ed: import('@tiptap/react').Editor) {
+  let target = -1;
+  ed.state.doc.descendants((n, pos) => {
+    if (target >= 0) return false;
+    if (n.isTextblock) { target = pos + 1; return false; }
+    return true;
+  });
+  if (target < 0) return;
+  ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, target)).setMeta('addToHistory', false));
+}
+
+export function VisualEditor() {
+  const project = useStore((s) => s.project);
+  const hasDoc = useStore(() => parsedMain().hasDocument);
+  const lastSerialized = useRef<string>('');
+  const reloadTimer = useRef<number>(0);
+  const updateTimer = useRef<number>(0);
+  const pending = useRef<(() => void) | null>(null);
+
+  const editor = useEditor({
+    extensions: extensions(),
+    content: toDocJson(parsedMain()) as any,
+    editorProps: { attributes: { spellcheck: 'true', 'aria-label': 'Report body' } },
+    onUpdate: ({ editor: ed }) => {
+      window.clearTimeout(updateTimer.current);
+      pending.current = () => {
+        pending.current = null;
+        const p = parsedMain();
+        if (!p.hasDocument) return;
+        const { tex } = serializeDocument(p.prefix, ed.getJSON() as JNode, p.suffix, p.leading);
+        lastSerialized.current = tex;
+        setFileText(mainFile(), tex, 'visual');
+        if (!ed.isDestroyed) reportSelection();
+      };
+      updateTimer.current = window.setTimeout(() => pending.current?.(), 180);
+    },
+    onSelectionUpdate: () => reportSelection(),
+    onCreate: ({ editor: ed }) => placeCaretAtFirstText(ed),
+    onFocus: () => { editorRef.lastFocus = 'visual'; },
+  }, [project?.root]);
+
+  function reportSelection() {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const { selection, doc } = ed.state;
+    const $from = selection.$from;
+    let index: number;
+    let pos: number;
+    if (selection instanceof NodeSelection && $from.depth === 0) {
+      index = $from.index(0);
+      pos = selection.from;
+    } else {
+      index = $from.index(0);
+      pos = $from.depth >= 1 ? $from.before(1) : selection.from;
+    }
+    if (index >= doc.childCount) { setState({ selection: null, syncLines: null }); return; }
+    const node = doc.child(index);
+    let inline: { type: string; attrs: Record<string, any>; pos: number } | null = null;
+    if (selection instanceof NodeSelection && selection.node.isInline) inline = { type: selection.node.type.name, attrs: { ...selection.node.attrs }, pos: selection.from };
+    const lines = editorBlockLines()[index] ?? null;
+    setState({ selection: { index, pos, type: node.type.name, attrs: { ...node.attrs }, inline }, syncLines: lines });
+  }
+
+  useEffect(() => {
+    editorRef.current = editor;
+    flushVisual = () => { window.clearTimeout(updateTimer.current); pending.current?.(); };
+    setFlushHook(flushVisual);
+    return () => {
+      window.clearTimeout(updateTimer.current);
+      pending.current?.();
+      if (editorRef.current === editor) editorRef.current = null;
+    };
+  }, [editor]);
+
+  // reload from source when the text changes elsewhere
+  useEffect(() => {
+    let lastVersion = getState().files[mainFile()]?.version ?? 0;
+    let lastBlocks = getState().project?.manifest.blocks;
+    return subscribe(() => {
+      const s = getState();
+      const f = s.files[mainFile()];
+      const ed = editorRef.current;
+      if (s.project?.manifest.blocks !== lastBlocks) {
+        lastBlocks = s.project?.manifest.blocks;
+        ed?.view.dispatch(ed.state.tr.setMeta(numberingKey, true));
+      }
+      if (!f || !ed || f.version === lastVersion) return;
+      lastVersion = f.version;
+      if (f.origin === 'visual' || f.text === lastSerialized.current) return;
+      window.clearTimeout(reloadTimer.current);
+      reloadTimer.current = window.setTimeout(() => {
+        const cur = getState().files[mainFile()]?.text ?? '';
+        const p = parseDocument(cur);
+        if (!p.hasDocument) return;
+        const sel = ed.state.selection.from;
+        lastSerialized.current = cur;
+        ed.commands.setContent(toDocJson(p) as any, { emitUpdate: false });
+        const max = ed.state.doc.content.size;
+        try {
+          const $p = ed.state.doc.resolve(Math.min(sel, Math.max(0, max - 1)));
+          const s2 = TextSelection.findFrom($p, 1, true) ?? TextSelection.findFrom($p, -1, true);
+          if (s2) ed.view.dispatch(ed.state.tr.setSelection(s2).setMeta('addToHistory', false));
+        } catch { /* ignore */ }
+      }, f.origin === 'source' ? 300 : 0);
+    });
+  }, [editor]);
+
+  // highlight the block under the source cursor
+  const syncIndex = useStore((s) => s.syncIndex);
+  useEffect(() => { if (syncIndex !== null) scrollToBlock(syncIndex); }, [syncIndex]);
+
+  const theme = useStore((s) => s.project?.manifest.theme);
+  if (!hasDoc) {
+    return (
+      <div className="doc-canvas">
+        <div className="page" style={{ minHeight: 200 }}>
+          <div className="empty">
+            <h3>Visual editing is paused</h3>
+            <div className="small muted">The main file has no <span className="mono">\begin{'{document}'}</span> … <span className="mono">\end{'{document}'}</span> pair, so Quire cannot tell the body from the preamble. Fix it in the LaTeX view and the visual editor comes back.</div>
+            <button className="btn btn-sm" onClick={() => setState({ mode: 'source' })}>Open LaTeX source</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="doc-canvas" onMouseDown={(e) => { if (e.target === e.currentTarget) editor?.commands.focus('end'); }}>
+      <article className="page">
+        <div className="page-head" aria-hidden="true"><span>{theme?.headerLeft || project?.manifest.name}</span><span>{theme?.headerRight}</span></div>
+        <EditorContent editor={editor} />
+      </article>
+    </div>
+  );
+}

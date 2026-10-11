@@ -1,0 +1,7 @@
+field,label,populated,total,threshold
+ebitda,EBITDA field,6398,6657,0.98
+revenue,Revenue field,6640,6657,0.98
+total_debt,Total debt field,6601,6657,0.98
+interest_expense,Interest expense field,6569,6657,0.98
+industry_code,Industry code,6657,6657,0.995
+rating_date,Rating date,6650,6657,0.995
