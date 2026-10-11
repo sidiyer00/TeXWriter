@@ -4,7 +4,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { extensions, numberingKey, syncKey } from './nodes';
 import { editorRef } from './editorRef';
-import { autoPanel, getState, isRichSelection, mainFile, parsedMain, setFileText, setFlushHook, setState, subscribe, useStore } from '../store';
+import { getState, mainFile, parsedMain, setFileText, setFlushHook, setState, subscribe, useStore } from '../store';
 import { commentsKey } from './comments';
 import { visualContextMenu } from './contextMenu';
 import { serializeDocument, toDocJson, parseDocument } from '../../shared/latex/blocks';
@@ -100,7 +100,6 @@ export function VisualEditor() {
     const lines = editorBlockLines()[index] ?? null;
     const next = { index, pos, type: node.type.name, attrs: { ...node.attrs }, inline };
     setState({ selection: next, syncLines: lines });
-    autoPanel(isRichSelection(next, ed.isActive('table')));
   }
 
   useEffect(() => {

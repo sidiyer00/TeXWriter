@@ -63,8 +63,12 @@ Never "normalize" untouched LaTeX.
   contains a cross-ref becomes a native DOM drag and the `\autoref` turns into plain text.
 - Global shortcuts are a capture-phase `keydown` in `App.tsx`. Keep the "in a form field →
   don't intercept" guard (Ctrl+Enter in a comment box used to trigger a compile).
-- The properties panel auto-opens/closes on rich selections, deferred until mouse-up
-  (`autoPanel` in `store.ts`) so the page doesn't shift between the clicks of a double-click.
+- The right panel opens only on request (toolbar buttons, Ctrl+Alt+P/C, context menu,
+  clicking a comment), never from selection changes; while open, the toolbar's
+  Comments/Properties buttons are hidden in favour of the panel's own tabs.
+- Dropdowns/context menus render through `Floating` (`Menu.tsx`): a portal into `body` at
+  fixed coords, because `.titlebar` and scrolling `.menu`s clip absolute children.
+  Submenus open on click, not hover. Outside-click handlers must ignore `.closest('.menu')`.
 - Find bar: subscribe to editor transactions *before* dispatching the query, or the
   match count is stale.
 - pdf.js must be the legacy build (Electron's Chromium lacks newer built-ins).

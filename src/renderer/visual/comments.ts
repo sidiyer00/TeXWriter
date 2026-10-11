@@ -120,7 +120,7 @@ export const Comments = Extension.create({
           if (!st) return false;
           for (const [id, r] of st.ranges) {
             if (pos >= r.from && pos <= r.to) {
-              setState((s) => ({ activeComment: id, panel: { open: true, tab: 'comments', auto: s.panel.auto && !s.panel.open } }));
+              setState({ activeComment: id, panel: { open: true, tab: 'comments' } });
               view.dispatch(view.state.tr.setMeta(commentsKey, true));
               return false;
             }

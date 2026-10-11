@@ -1,56 +1,89 @@
 // Menus: the title-bar menu bar, dropdown/context menus with submenus and keyboard support.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { setState, useStore, type MenuItem } from '../store';
 import { editMenu, fileMenu, helpMenu, insertMenu, runMenu, viewMenu } from '../commands';
 import { Check, Right } from './Icons';
 
-export function MenuList({ items, onDone, style, autoFocus = true }: { items: MenuItem[]; onDone: () => void; style?: React.CSSProperties; autoFocus?: boolean }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [hi, setHi] = useState(-1);
-  const [sub, setSub] = useState<number | null>(null);
-  const [pos, setPos] = useState<React.CSSProperties>(style ?? {});
-  const enabled = items.map((it, i) => (!it.separator && !it.disabled ? i : -1)).filter((i) => i >= 0);
+/** Viewport position for a floating menu; `flipX` is where its right edge goes if it would overflow (submenus). */
+export interface Anchor { x: number; y: number; alignRight?: boolean; flipX?: number }
+
+/**
+ * A popup rendered into document.body at fixed viewport coordinates, so no ancestor's
+ * overflow (title bar, scrolling parent menu) can clip it. Nudged to stay on screen.
+ */
+export function Floating({ at, children, className = 'menu', elRef, ...rest }: { at: Anchor; children: React.ReactNode; className?: string; elRef?: React.RefObject<HTMLDivElement | null> } & Omit<React.HTMLAttributes<HTMLDivElement>, 'className' | 'children'>) {
+  const own = useRef<HTMLDivElement>(null);
+  const ref = elRef ?? own;
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   useLayoutEffect(() => {
-    // keep the menu on screen
     const el = ref.current;
     if (!el) return;
-    const r = el.getBoundingClientRect();
-    const next: React.CSSProperties = { ...style };
-    if (r.right > window.innerWidth - 4) next.left = Math.max(4, (Number(style?.left) || 0) - (r.right - window.innerWidth) - 8);
-    if (r.bottom > window.innerHeight - 4) next.top = Math.max(4, (Number(style?.top) || 0) - (r.bottom - window.innerHeight) - 8);
-    setPos(next);
-  }, [style?.left, style?.top]);
+    const w = el.offsetWidth, h = el.offsetHeight, W = window.innerWidth, H = window.innerHeight;
+    let left = at.alignRight ? at.x - w : at.x;
+    if (left + w > W - 4) left = at.flipX !== undefined ? at.flipX - w : W - w - 4;
+    setPos({ left: Math.max(4, left), top: Math.max(4, Math.min(at.y, H - h - 4)) });
+  }, [at.x, at.y, at.alignRight, at.flipX]);
+  return createPortal(
+    <div {...rest} className={className} ref={ref} style={{ position: 'fixed', zIndex: 70, left: pos?.left ?? at.x, top: pos?.top ?? at.y, visibility: pos ? 'visible' : 'hidden' }}>{children}</div>,
+    document.body,
+  );
+}
+
+/** Anchor just below an element (menu bar buttons, toolbar dropdowns). */
+export const below = (el: HTMLElement, alignRight = false): Anchor => {
+  const r = el.getBoundingClientRect();
+  return { x: alignRight ? r.right : r.left, y: r.bottom + 4, alignRight };
+};
+
+export function MenuList({ items, onDone, onBack, at, autoFocus = true, className = '' }: { items: MenuItem[]; onDone: () => void; onBack?: () => void; at: Anchor; autoFocus?: boolean; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [hi, setHi] = useState(-1);
+  const [sub, setSub] = useState<{ i: number; at: Anchor } | null>(null);
+  const enabled = items.map((it, i) => (!it.separator && !it.disabled ? i : -1)).filter((i) => i >= 0);
   useEffect(() => { if (autoFocus) ref.current?.focus(); }, []);
-  const run = (it: MenuItem, i: number) => {
+  // submenus open on click (or Enter / ArrowRight), never on hover
+  const openSub = (i: number, toggle: boolean) => {
+    if (toggle && sub?.i === i) { setSub(null); return; }
+    const r = (ref.current?.children[i] as HTMLElement | undefined)?.getBoundingClientRect();
+    if (r) setSub({ i, at: { x: r.right + 2, y: r.top - 5, flipX: r.left - 2 } });
+  };
+  const run = (it: MenuItem, i: number, toggle = true) => {
     if (it.disabled || it.separator) return;
-    if (it.submenu) { setSub(i); return; }
+    if (it.submenu) { setHi(i); openSub(i, toggle); return; }
     onDone();
     it.run?.();
   };
   return (
-    <div className="menu" role="menu" ref={ref} tabIndex={-1} style={pos}
-      onKeyDown={(e) => {
-        if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => enabled[(enabled.indexOf(h) + 1) % enabled.length] ?? -1); }
-        else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => enabled[(enabled.indexOf(h) - 1 + enabled.length) % enabled.length] ?? -1); }
-        else if (e.key === 'Enter' && hi >= 0) { e.preventDefault(); run(items[hi], hi); }
-        else if (e.key === 'ArrowRight' && hi >= 0 && items[hi].submenu) { e.preventDefault(); setSub(hi); }
-        else if (e.key === 'Escape' || e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); onDone(); }
-      }}>
-      {items.map((it, i) => it.separator
-        ? <div key={i} className="msep" role="separator" />
-        : (
-          <div key={i} style={{ position: 'relative' }} onMouseEnter={() => { setHi(i); setSub(it.submenu ? i : null); }}>
-            <button role="menuitem" className={`mitem ${hi === i ? 'hi' : ''} ${it.danger ? 'danger' : ''}`} disabled={it.disabled} aria-haspopup={it.submenu ? 'menu' : undefined}
-              onMouseDown={(e) => e.preventDefault()} onClick={() => run(it, i)}>
-              <span className="mcheck">{it.checked ? <Check size={12} strokeWidth={2.6} /> : null}</span>
-              <span className="grow">{it.label}</span>
-              {it.shortcut && <span className="mkey">{it.shortcut}</span>}
-              {it.submenu && <Right size={12} />}
-            </button>
-            {sub === i && it.submenu && <MenuList items={it.submenu} onDone={onDone} autoFocus={false} style={{ left: '100%', top: -5 }} />}
-          </div>
-        ))}
-    </div>
+    <>
+      <Floating at={at} elRef={ref} className={`menu ${className}`} role="menu" tabIndex={-1}
+        onKeyDown={(e) => {
+          const k = e.key;
+          if (k === 'ArrowDown') setHi((h) => enabled[(enabled.indexOf(h) + 1) % enabled.length] ?? -1);
+          else if (k === 'ArrowUp') setHi((h) => enabled[(enabled.indexOf(h) - 1 + enabled.length) % enabled.length] ?? -1);
+          else if (k === 'Enter' && hi >= 0) run(items[hi], hi, false);
+          else if (k === 'ArrowRight' && hi >= 0 && items[hi].submenu) openSub(hi, false);
+          else if (k === 'Escape' || (k === 'ArrowLeft' && onBack)) (onBack ?? onDone)();
+          else return;
+          // handled keys must not also reach a parent menu (React events bubble through portals)
+          e.preventDefault(); e.stopPropagation();
+        }}>
+        {items.map((it, i) => it.separator
+          ? <div key={i} className="msep" role="separator" />
+          : (
+            <div key={i} onMouseEnter={() => setHi(i)}>
+              <button role="menuitem" className={`mitem ${hi === i || sub?.i === i ? 'hi' : ''} ${it.danger ? 'danger' : ''}`} disabled={it.disabled} aria-haspopup={it.submenu ? 'menu' : undefined} aria-expanded={it.submenu ? sub?.i === i : undefined}
+                onMouseDown={(e) => e.preventDefault()} onClick={() => run(it, i)}>
+                <span className="mcheck">{it.checked ? <Check size={12} strokeWidth={2.6} /> : null}</span>
+                <span className="grow">{it.label}</span>
+                {it.shortcut && <span className="mkey">{it.shortcut}</span>}
+                {it.submenu && <Right size={12} />}
+              </button>
+            </div>
+          ))}
+      </Floating>
+      {sub && items[sub.i]?.submenu && <MenuList items={items[sub.i].submenu!} onDone={onDone} onBack={() => { setSub(null); ref.current?.focus(); }} at={sub.at} className={className} />}
+    </>
   );
 }
 
@@ -59,7 +92,7 @@ export function ContextMenu() {
   const spell = useStore((s) => s.spell);
   useEffect(() => {
     if (!cm) return;
-    const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest?.('.ctx-root')) setState({ contextMenu: null }); };
+    const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest?.('.menu')) setState({ contextMenu: null }); };
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') setState({ contextMenu: null }); };
     const blur = () => setState({ contextMenu: null });
     setTimeout(() => document.addEventListener('mousedown', close), 0);
@@ -81,9 +114,7 @@ export function ContextMenu() {
     ];
   }
   return (
-    <div className="ctx-root" style={{ position: 'fixed', left: 0, top: 0, zIndex: 80 }}>
-      <MenuList items={items} onDone={() => setState({ contextMenu: null, spell: null })} style={{ left: cm.x, top: cm.y, position: 'fixed' }} />
-    </div>
+    <MenuList items={items} onDone={() => setState({ contextMenu: null, spell: null })} at={{ x: cm.x, y: cm.y }} className="ctx" />
   );
 }
 
@@ -97,22 +128,23 @@ const MENUS: { label: string; items: () => MenuItem[] }[] = [
 ];
 
 export function MenuBar() {
-  const [open, setOpen] = useState<number | null>(null);
+  const [open, setOpen] = useState<{ i: number; at: Anchor } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const show = (i: number, el: HTMLElement) => setOpen({ i, at: below(el) });
   useEffect(() => {
     if (open === null) return;
-    const h = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(null); };
+    const h = (e: MouseEvent) => { const t = e.target as HTMLElement; if (!ref.current?.contains(t) && !t.closest?.('.menu')) setOpen(null); };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, [open]);
   return (
     <div className="menubar no-drag" ref={ref} role="menubar" aria-label="Application menu">
       {MENUS.map((m, i) => (
-        <div key={m.label} style={{ position: 'relative' }}>
-          <button role="menuitem" className={`mbtn ${open === i ? 'open' : ''}`} aria-haspopup="menu" aria-expanded={open === i}
+        <div key={m.label}>
+          <button role="menuitem" className={`mbtn ${open?.i === i ? 'open' : ''}`} aria-haspopup="menu" aria-expanded={open?.i === i}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setOpen(open === i ? null : i)} onMouseEnter={() => { if (open !== null) setOpen(i); }}>{m.label}</button>
-          {open === i && <MenuList items={m.items()} onDone={() => setOpen(null)} style={{ left: 0, top: 30 }} />}
+            onClick={(e) => (open?.i === i ? setOpen(null) : show(i, e.currentTarget))} onMouseEnter={(e) => { if (open && open.i !== i) show(i, e.currentTarget); }}>{m.label}</button>
+          {open?.i === i && <MenuList items={m.items()} onDone={() => setOpen(null)} at={open.at} />}
         </div>
       ))}
     </div>

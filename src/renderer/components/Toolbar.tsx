@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { editorRef } from '../visual/editorRef';
 import { getState, setState, togglePanel, useStore, mainFile, type MenuItem } from '../store';
 import { insertEquation, insertFigure, insertInlineMath, insertLink, newComment, insertMenu } from '../commands';
-import { MenuList } from './Menu';
+import { MenuList, below, type Anchor } from './Menu';
 import { useOutside } from './Chrome';
 import { Down, List, OList } from './Icons';
 import { HIGHLIGHTS, TEXT_COLORS, cssColor } from '../visual/marks';
@@ -69,13 +69,13 @@ export function OverflowBar({ items, extra, label, right }: { items: Item[]; ext
 }
 
 function MoreMenu({ items }: { items: MenuItem[] }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<Anchor | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-  useOutside(ref, () => setOpen(false));
+  useOutside(ref, () => setOpen(null));
   return (
-    <div ref={ref} style={{ position: 'relative', flex: 'none' }}>
-      <button className="tb" aria-haspopup="menu" aria-expanded={open} onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(!open)}>More <Down size={12} /></button>
-      {open && <MenuList items={items} onDone={() => setOpen(false)} style={{ top: 32, left: 0 }} />}
+    <div ref={ref} style={{ flex: 'none' }}>
+      <button className="tb" aria-haspopup="menu" aria-expanded={!!open} onMouseDown={(e) => e.preventDefault()} onClick={(e) => setOpen(open ? null : below(e.currentTarget))}>More <Down size={12} /></button>
+      {open && <MenuList items={items} onDone={() => setOpen(null)} at={open} />}
     </div>
   );
 }
@@ -177,9 +177,10 @@ export function FormatToolbar() {
   const extra = insertMenu().filter((m) => m.label && ['Footnote', 'Code block', 'Callout', 'Page break', 'Raw LaTeX block', 'Test result…'].includes(m.label));
   return (
     <>
-      <OverflowBar label="Formatting" items={items} extra={extra} right={<>
-        <button className="tb" aria-pressed={panel.open && panel.tab === 'comments'} title="Comments  Ctrl+Alt+C" onClick={() => togglePanel('comments')}>Comments{comments ? <span className="countpill">{comments}</span> : null}</button>
-        <button className="tb" aria-pressed={panel.open && panel.tab === 'properties'} title="Properties panel  Ctrl+Alt+P" onClick={() => togglePanel('properties')}>Properties</button>
+      {/* once the panel is open its own tabs take over; these come back when it is closed */}
+      <OverflowBar label="Formatting" items={items} extra={extra} right={panel.open ? null : <>
+        <button className="tb" title="Comments  Ctrl+Alt+C" onClick={() => togglePanel('comments')}>Comments{comments ? <span className="countpill">{comments}</span> : null}</button>
+        <button className="tb" title="Properties panel  Ctrl+Alt+P" onClick={() => togglePanel('properties')}>Properties</button>
       </>} />
       {ed?.isActive('table') && <TableToolbar />}
     </>
@@ -261,7 +262,7 @@ function TableToolbar() {
     { label: 'Caption below table', checked: tb?.node.attrs.captionPos === 'bottom', run: () => setTableBlockAttrs(ed, { captionPos: 'bottom' }) },
     { label: 'Smaller font', checked: tb?.node.attrs.size === 'small', run: () => setTableBlockAttrs(ed, { size: tb?.node.attrs.size === 'small' ? '' : 'small' }) },
     { separator: true },
-    { label: 'Table properties', run: () => setState({ panel: { open: true, tab: 'properties', auto: false } }) },
+    { label: 'Table properties', run: () => setState({ panel: { open: true, tab: 'properties' } }) },
     { label: 'Delete table', danger: true, run: () => { const t = tableBlockAt(ed); if (t) ed.view.dispatch(ed.state.tr.delete(t.pos, t.pos + t.node.nodeSize)); } },
   ];
   void getState;

@@ -71,8 +71,8 @@ export interface State {
   settings: AppSettings | null;
   /** files open as tabs in the source pane (main file is always first) */
   openTabs: string[];
-  /** right-hand panel: open state, active tab, and whether it was opened automatically */
-  panel: { open: boolean; tab: 'properties' | 'comments'; auto: boolean };
+  /** right-hand panel: open state and active tab (opened only on request, never automatically) */
+  panel: { open: boolean; tab: 'properties' | 'comments' };
   find: { replace: boolean; nonce: number } | null;
   comments: CommentThread[];
   activeComment: string | null;
@@ -105,7 +105,7 @@ const initial: State = {
   runs: [], runCache: {}, running: null, compiling: null, lastCompile: null, pdfVersion: 0, selection: null, sourceLine: null, syncLines: null, syncIndex: null,
   bib: [], labels: new Map(), outline: [], numbers: new Map(), renders: {}, externalChange: null, toast: null,
   selectedRun: null, selectedTest: null, reviewPage: 1, reviewIssue: null, jump: null, pdfJump: null, insertAfter: null,
-  settings: null, openTabs: [], panel: { open: false, tab: 'properties', auto: true }, find: null, comments: [], activeComment: null, draftComment: null,
+  settings: null, openTabs: [], panel: { open: false, tab: 'properties' }, find: null, comments: [], activeComment: null, draftComment: null,
   contextMenu: null, spell: null, quickOpen: false, equationModal: null, dialog: null, prompt: null, picker: null, editorTick: 0,
 };
 
@@ -693,43 +693,11 @@ export function updateAnchorQuotes(updates: { id: string; quote: string; prefix:
 
 // ------------------------------------------------------------------ panel & menus
 
-const RICH = new Set(['mathBlock', 'generatedBlock', 'figureBlock', 'tableBlock', 'rawBlock']);
-export function isRichSelection(sel: Selection | null, inTable: boolean): boolean {
-  if (inTable) return true;
-  if (!sel) return false;
-  if (sel.inline) return sel.inline.type === 'inlineMath' || sel.inline.type === 'citation' || sel.inline.type === 'crossRef' || sel.inline.type === 'footnote';
-  return RICH.has(sel.type);
-}
-
 export function togglePanel(tab?: 'properties' | 'comments') {
   setState((s) => {
-    if (tab && s.panel.open && s.panel.tab !== tab) return { panel: { open: true, tab, auto: false } };
-    return { panel: { open: !s.panel.open, tab: tab ?? s.panel.tab, auto: false } };
+    if (tab && s.panel.open && s.panel.tab !== tab) return { panel: { open: true, tab } };
+    return { panel: { open: !s.panel.open, tab: tab ?? s.panel.tab } };
   });
-}
-
-/**
- * Open the panel automatically for equations, tables and figures; close it again when
- * leaving them. Deferred until the mouse is released and the selection has settled, so
- * the page never shifts between the two clicks of a double-click.
- */
-let autoTimer = 0;
-let autoRich = false;
-let mouseDown = false;
-window.addEventListener('pointerdown', () => { mouseDown = true; }, true);
-window.addEventListener('pointerup', () => { mouseDown = false; }, true);
-function applyAutoPanel() {
-  if (mouseDown) { autoTimer = window.setTimeout(applyAutoPanel, 150); return; }
-  const p = state.panel;
-  const rich = autoRich;
-  if (rich && !p.open) setState({ panel: { open: true, tab: 'properties', auto: true } });
-  else if (rich && p.open && p.auto && p.tab !== 'properties') setState({ panel: { ...p, tab: 'properties' } });
-  else if (!rich && p.open && p.auto && p.tab === 'properties') setState({ panel: { ...p, open: false } });
-}
-export function autoPanel(rich: boolean) {
-  autoRich = rich;
-  window.clearTimeout(autoTimer);
-  autoTimer = window.setTimeout(applyAutoPanel, 350);
 }
 
 /**

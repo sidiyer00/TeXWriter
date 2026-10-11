@@ -124,7 +124,7 @@ export function newComment() {
   if (empty) { toast('Select the text you want to comment on first.'); return; }
   const a = anchorFor(ed.state.doc, from, to);
   if (!a.quote.trim()) { toast('Comments attach to text; select some words.'); return; }
-  setState({ draftComment: { ...a, from, to }, panel: { open: true, tab: 'comments', auto: false } });
+  setState({ draftComment: { ...a, from, to }, panel: { open: true, tab: 'comments' } });
 }
 
 /**

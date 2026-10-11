@@ -94,9 +94,9 @@ function RightPanel() {
   return (
     <aside className="panel-right" aria-label={panel.tab === 'comments' ? 'Comments' : 'Properties'}>
       <div className="tabs" role="tablist">
-        <button className="tab" role="tab" aria-selected={panel.tab === 'properties'} onClick={() => setState({ panel: { open: true, tab: 'properties', auto: false } })}>Properties</button>
-        <button className="tab" role="tab" aria-selected={panel.tab === 'comments'} onClick={() => setState({ panel: { open: true, tab: 'comments', auto: false } })}>Comments{open ? <span className="countpill">{open}</span> : null}</button>
-        <button className="btn btn-q ib btn-sm" style={{ marginLeft: 'auto' }} aria-label="Close panel" title={panel.auto ? 'Close (opens again when you select an equation, table or figure)' : 'Close  Ctrl+Alt+P'} onClick={() => setState({ panel: { ...panel, open: false, auto: true } })}><X /></button>
+        <button className="tab" role="tab" aria-selected={panel.tab === 'properties'} onClick={() => setState({ panel: { open: true, tab: 'properties' } })}>Properties</button>
+        <button className="tab" role="tab" aria-selected={panel.tab === 'comments'} onClick={() => setState({ panel: { open: true, tab: 'comments' } })}>Comments{open ? <span className="countpill">{open}</span> : null}</button>
+        <button className="btn btn-q ib btn-sm" style={{ marginLeft: 'auto' }} aria-label="Close panel" title="Close panel" onClick={() => setState({ panel: { ...panel, open: false } })}><X /></button>
       </div>
       {panel.tab === 'comments' ? <CommentsPanel /> : <Properties />}
     </aside>

@@ -127,6 +127,15 @@ await step('toolbar-overflow', async () => {
   await win.setViewportSize({ width: 1440, height: 900 });
   await win.waitForTimeout(400);
 });
+await step('menubar', async () => {
+  await win.getByRole('menubar').getByRole('menuitem', { name: 'Insert' }).click();
+  const m = win.locator('.menu').first();
+  await m.waitFor();
+  const ok = await m.evaluate((el) => { const tb = document.querySelector('.titlebar').getBoundingClientRect(); const last = [...el.querySelectorAll('.mitem')].pop().getBoundingClientRect(); const hit = document.elementFromPoint(last.left + 20, last.top + last.height / 2); return last.top > tb.bottom && el.contains(hit); });
+  if (!ok) throw new Error('menu bar dropdown clipped by the title bar');
+  await shot('12b-insert-menu');
+  await win.keyboard.press('Escape');
+});
 await step('underline-colour', async () => {
   const p = win.locator('.ProseMirror > p').nth(2);
   await p.scrollIntoViewIfNeeded();
@@ -175,7 +184,7 @@ await step('table', async () => {
   await win.getByRole('button', { name: /^Insert \d+ × \d+ table$/ }).click();
   await win.locator('.tblock').first().waitFor();
   await win.waitForTimeout(900);
-  if (!(await win.locator('.panel-right').count())) throw new Error('properties panel did not auto-open for table');
+  if (await win.locator('.panel-right').count()) throw new Error('properties panel opened by itself for a table');
   await win.keyboard.type('Grade');
   await win.keyboard.press('Tab');
   await win.keyboard.type('PD');
@@ -185,10 +194,14 @@ await step('table', async () => {
   const t = texNow();
   if (!/\\begin\{tabular\}\{l r r\}|\\begin\{tabular\}\{lrr\}/.test(t) && !/\\begin\{tabular\}/.test(t)) throw new Error('table not serialized');
   if (!t.includes('Grade')) throw new Error('cell text not serialized');
-  // leave the table: panel closes again
-  await win.locator('.ProseMirror > p').first().click();
-  await win.waitForTimeout(900);
-  if (await win.locator('.panel-right').count()) throw new Error('panel stayed open after leaving the table');
+  // the panel opens only from its button; while open, the toolbar buttons give way to its tabs
+  const fmt = win.getByRole('toolbar', { name: 'Formatting' });
+  await fmt.getByRole('button', { name: 'Properties' }).click();
+  await win.locator('.panel-right').waitFor();
+  if (await fmt.getByRole('button', { name: /^(Properties|Comments)/ }).count()) throw new Error('toolbar panel buttons still shown while panel open');
+  await win.getByRole('button', { name: 'Close panel' }).click();
+  await fmt.getByRole('button', { name: 'Properties' }).waitFor();
+  if (await win.locator('.panel-right').count()) throw new Error('panel did not close');
 });
 await step('comments', async () => {
   const p = win.locator('.ProseMirror > p').nth(1);
@@ -214,11 +227,22 @@ await step('comments', async () => {
 await step('context-menu', async () => {
   const p = win.locator('.ProseMirror > p').nth(2);
   await p.click({ button: 'right' });
-  await win.locator('.ctx-root .menu').waitFor();
+  await win.locator('.menu.ctx').waitFor();
+  const colour = win.locator('.menu.ctx').getByRole('menuitem', { name: 'Text colour' });
+  await colour.hover();
+  await win.waitForTimeout(300);
+  if ((await win.locator('.menu.ctx').count()) !== 1) throw new Error('submenu opened on hover');
+  await colour.click();
+  const subm = win.locator('.menu.ctx').nth(1);
+  await subm.waitFor();
+  const vis = await subm.evaluate((el) => { const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + 12); return r.right <= innerWidth && r.bottom <= innerHeight && !!hit && el.contains(hit); });
+  if (!vis) throw new Error('context submenu clipped or hidden');
   await shot('16-context-menu');
+  await win.keyboard.press('Escape');
   await win.keyboard.press('Escape');
 });
 await step('ctrl-click-ref', async () => {
+  if (await win.locator('.panel-right').count()) await win.getByRole('button', { name: 'Close panel' }).click();
   const ref = win.locator('.chip-ref').first();
   await ref.scrollIntoViewIfNeeded();
   const before = await win.evaluate(() => document.querySelector('.doc-canvas').scrollTop);
@@ -227,6 +251,7 @@ await step('ctrl-click-ref', async () => {
   const after = await win.evaluate(() => document.querySelector('.doc-canvas').scrollTop);
   console.log('scroll before/after ctrl+click', before, after);
   if (Math.abs(after - before) < 20 && !(await win.locator('.sync-target').count())) throw new Error('ctrl+click did not navigate');
+  if (await win.locator('.panel-right').count()) throw new Error('ctrl+click on a cross-ref opened the side panel');
 });
 await step('drag-ref', async () => {
   // Playwright cannot start a native drag under xvfb, so dispatch the DnD events ProseMirror handles.

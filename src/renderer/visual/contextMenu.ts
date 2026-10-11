@@ -106,7 +106,7 @@ export function visualContextMenu(ed: Editor, e: MouseEvent) {
 
   items.push({ label: 'Insert', submenu: insertMenu() });
   items.push({ separator: true });
-  items.push({ label: 'Properties', shortcut: 'Ctrl+Alt+P', run: () => setState({ panel: { open: true, tab: 'properties', auto: false } }) });
+  items.push({ label: 'Properties', shortcut: 'Ctrl+Alt+P', run: () => setState({ panel: { open: true, tab: 'properties' } }) });
   items.push({
     label: 'Show in LaTeX source', run: () => {
       const idx = st.selection.$from.index(0);

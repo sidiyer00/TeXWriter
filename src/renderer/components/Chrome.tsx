@@ -6,11 +6,12 @@ import { editorRef } from '../visual/editorRef';
 import { sourceViewRef } from './SourceEditor';
 import { undo, redo } from '@codemirror/commands';
 import { hash } from '../../shared/latex/scan';
-import { MenuBar } from './Menu';
+import { Floating, MenuBar, below, type Anchor } from './Menu';
 
 export function useOutside(ref: React.RefObject<HTMLElement | null>, onOut: () => void) {
   useEffect(() => {
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onOut(); };
+    // floating menus live in a portal outside `ref`; a click inside one is not "outside"
+    const h = (e: MouseEvent) => { const t = e.target as HTMLElement; if (ref.current && !ref.current.contains(t) && !t.closest?.('.menu')) onOut(); };
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onOut(); };
     document.addEventListener('mousedown', h);
     document.addEventListener('keydown', k);
@@ -19,23 +20,23 @@ export function useOutside(ref: React.RefObject<HTMLElement | null>, onOut: () =
 }
 
 export function ExportMenu() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<Anchor | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-  useOutside(ref, () => setOpen(false));
+  useOutside(ref, () => setOpen(null));
   const project = useStore((s) => s.project);
   const lastCompile = useStore((s) => s.lastCompile);
   const go = async (kind: 'pdf' | 'zip' | 'prov') => {
-    setOpen(false);
+    setOpen(null);
     if (!project) return;
     const fn = kind === 'pdf' ? api.exportPdf : kind === 'zip' ? api.exportBundle : api.exportProvenance;
     const out = await guard(() => fn(project.root), 'Export failed');
     if (out) toast(`Saved ${out}`, 'ok', { label: 'Show in folder', run: () => void api.revealInFolder(out) });
   };
   return (
-    <div ref={ref} style={{ position: 'relative' }} className="no-drag">
-      <button className="btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>Export <Down /></button>
+    <div ref={ref} className="no-drag">
+      <button className="btn" aria-haspopup="menu" aria-expanded={!!open} onClick={(e) => setOpen(open ? null : below(e.currentTarget, true))}>Export <Down /></button>
       {open && (
-        <div className="menu" role="menu" style={{ right: 0, top: 34 }}>
+        <Floating at={open} role="menu">
           <button role="menuitem" onClick={() => go('pdf')} disabled={!lastCompile?.pdfPath}>
             <span className="grow"><b style={{ fontWeight: 500 }}>PDF</b><div className="small muted">{lastCompile?.pdfPath ? `${lastCompile.pages ?? '?'} pages, compiled ${new Date(lastCompile.startedAt).toLocaleTimeString()}` : 'Compile first'}</div></span>
           </button>
@@ -45,7 +46,7 @@ export function ExportMenu() {
           <button role="menuitem" onClick={() => go('prov')}>
             <span className="grow"><b style={{ fontWeight: 500 }}>Provenance (.json)</b><div className="small muted">Runs, commits and file hashes behind the PDF</div></span>
           </button>
-        </div>
+        </Floating>
       )}
     </div>
   );
