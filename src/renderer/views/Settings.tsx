@@ -62,6 +62,7 @@ export function SettingsScreen() {
             <h2>General</h2>
             <TextSetting label="Your name (shown on comments you write)" value={settings.userName} placeholder="e.g. Sid Iyer" onSave={(v) => void updateSettings({ userName: v })} />
             <div className="small muted">Comments are stored in quire-comments.json in the project folder. Anyone you share the folder with (OneDrive, a network drive, Git) sees them, with your name on them.</div>
+            <TextSetting label="Projects folder (new and sample projects; default for exports)" mono browse="dir" value={settings.projectsDir} placeholder="Leave empty for Documents\Quire" onSave={(v) => void updateSettings({ projectsDir: v })} />
             <label className="f">Interface size
               <select className="field" style={{ width: 160 }} value={settings.uiZoom} onChange={(e) => void updateSettings({ uiZoom: Number(e.target.value) })}>
                 {[0.8, 0.9, 1, 1.1, 1.25, 1.5].map((z) => <option key={z} value={z}>{Math.round(z * 100)}%</option>)}

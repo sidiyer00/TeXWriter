@@ -13,7 +13,7 @@ import { compile, cancelCompile, synctexEdit, synctexView } from './compile';
 import { cancelRun, listRuns, loadRun, runTests } from './runs';
 import { pdfPath, provenance, writeBundle } from './exporter';
 import { refreshRegistryDirs, toolchain } from './toolchain';
-import { getSettings, saveSettings } from './settings';
+import { getSettings, projectsDir, saveSettings } from './settings';
 import type { AppSettings } from '../shared/types';
 
 protocol.registerSchemesAsPrivileged([
@@ -168,7 +168,7 @@ function registerIpc() {
     return r.canceled ? null : r.filePaths[0];
   });
   handle('defaultProjectsDir', async () => {
-    const d = path.join(app.getPath('documents'), 'Quire');
+    const d = projectsDir();
     await fsp.mkdir(d, { recursive: true });
     return d;
   });
@@ -244,7 +244,7 @@ function registerIpc() {
     const m = await readManifest(root);
     const src = pdfPath(root, m);
     if (!fs.existsSync(src)) throw new Error('Compile the report before exporting.');
-    const r = await dialog.showSaveDialog(win!, { title: 'Export PDF', defaultPath: path.join(app.getPath('documents'), `${m.name.replace(/[\\/:*?"<>|]/g, '-')}.pdf`), filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    const r = await dialog.showSaveDialog(win!, { title: 'Export PDF', defaultPath: path.join(projectsDir(), `${m.name.replace(/[\\/:*?"<>|]/g, '-')}.pdf`), filters: [{ name: 'PDF', extensions: ['pdf'] }] });
     if (r.canceled || !r.filePath) return null;
     await fsp.copyFile(src, r.filePath);
     return r.filePath;
@@ -252,7 +252,7 @@ function registerIpc() {
   handle('exportBundle', async (root: string) => {
     assertRoot(root);
     const m = await readManifest(root);
-    const r = await dialog.showSaveDialog(win!, { title: 'Export source bundle', defaultPath: path.join(app.getPath('documents'), `${m.name.replace(/[\\/:*?"<>|]/g, '-')}-source.zip`), filters: [{ name: 'Zip archive', extensions: ['zip'] }] });
+    const r = await dialog.showSaveDialog(win!, { title: 'Export source bundle', defaultPath: path.join(projectsDir(), `${m.name.replace(/[\\/:*?"<>|]/g, '-')}-source.zip`), filters: [{ name: 'Zip archive', extensions: ['zip'] }] });
     if (r.canceled || !r.filePath) return null;
     await writeBundle(root, m, r.filePath);
     return r.filePath;
@@ -260,7 +260,7 @@ function registerIpc() {
   handle('exportProvenance', async (root: string) => {
     assertRoot(root);
     const m = await readManifest(root);
-    const r = await dialog.showSaveDialog(win!, { title: 'Export provenance', defaultPath: path.join(app.getPath('documents'), `${m.name.replace(/[\\/:*?"<>|]/g, '-')}-provenance.json`), filters: [{ name: 'JSON', extensions: ['json'] }] });
+    const r = await dialog.showSaveDialog(win!, { title: 'Export provenance', defaultPath: path.join(projectsDir(), `${m.name.replace(/[\\/:*?"<>|]/g, '-')}-provenance.json`), filters: [{ name: 'JSON', extensions: ['json'] }] });
     if (r.canceled || !r.filePath) return null;
     await fsp.writeFile(r.filePath, JSON.stringify(await provenance(root, m), null, 2));
     return r.filePath;

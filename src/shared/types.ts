@@ -214,6 +214,8 @@ export interface ToolchainInfo {
 export interface AppSettings {
   /** shown on comments you write */
   userName: string;
+  /** where new and sample projects go and exports default to; empty = Documents/Quire */
+  projectsDir: string;
   /** override: folder containing pdflatex/latexmk */
   texBinDir: string;
   /** override: python interpreter */

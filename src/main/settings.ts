@@ -7,6 +7,7 @@ import type { AppSettings } from '../shared/types';
 
 const DEFAULTS = (): AppSettings => ({
   userName: (() => { try { return os.userInfo().username; } catch { return 'Author'; } })(),
+  projectsDir: '',
   texBinDir: '',
   pythonPath: '',
   autoInstallPackages: true,
@@ -22,6 +23,11 @@ export function getSettings(): AppSettings {
   if (cached) return cached;
   try { cached = { ...DEFAULTS(), ...JSON.parse(fs.readFileSync(file(), 'utf8')) }; } catch { cached = DEFAULTS(); }
   return cached!;
+}
+
+/** Where new/sample projects are created and exports default to (Settings → Projects folder). */
+export function projectsDir(): string {
+  return getSettings().projectsDir || path.join(app.getPath('documents'), 'Quire');
 }
 
 export function saveSettings(patch: Partial<AppSettings>): AppSettings {

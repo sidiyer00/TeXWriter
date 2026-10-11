@@ -231,7 +231,7 @@ export function Home() {
                 <div className="empty">
                   <div style={{ fontWeight: 500 }}>CORP-PD v4.2 Annual Validation</div>
                   <div className="small muted">A complete validation report wired to a stdlib-only Python suite: discrimination, calibration, stability, data quality and backtesting tests, with generated tables and a reliability diagram.</div>
-                  <button className="btn" onClick={sample} style={{ marginTop: 4 }}>Create a copy in Documents/Quire</button>
+                  <button className="btn" onClick={sample} style={{ marginTop: 4 }}>Create a copy in your projects folder</button>
                 </div>
               </section>
             </aside>
