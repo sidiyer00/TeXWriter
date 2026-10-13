@@ -4,3 +4,7 @@ dist-electron/
 release/
 e2e-shots/
 *.log
+
+# local notes, not part of the repository
+CLAUDE.md
+HANDOFF.md

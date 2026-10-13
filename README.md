@@ -201,7 +201,6 @@ TeXWriter/
 `npm run typecheck` and `npm test` run the type check and unit tests. `npm run build && npm run
 e2e` drives the app through the full workflow (sample → run → insert → split edit → compile →
 tables and number formats → comments → setup) and writes screenshots to `e2e-shots/`.
-Contributor notes are in `CLAUDE.md`; current status and open items in `HANDOFF.md`.
 
 ## Known limits (v0.2.3)
 
