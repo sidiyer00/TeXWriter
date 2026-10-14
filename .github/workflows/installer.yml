@@ -1,7 +1,9 @@
 # Builds the Windows installer (release/Quire-Setup-<version>.exe) on a Windows runner.
 # Every push and pull request: the installer is attached to the run as an artifact
-# (Actions → the run → Artifacts). Pushing a tag v<version> also publishes it as a
-# GitHub Release, which is the download link to give people.
+# (Actions → the run → Artifacts). A push to main (or a tag v<version>) also publishes it
+# as the GitHub Release v<version> from package.json — the download link to give people.
+# Bump "version" in package.json for a new release; pushes without a bump refresh the
+# installer on the existing release.
 name: Windows installer
 
 on:
@@ -64,9 +66,23 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Release version
+        id: ver
+        shell: bash
+        run: echo "tag=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Quire ${{ steps.ver.outputs.tag }}
           files: release/Quire-Setup-*.exe
+          overwrite_files: true
+          make_latest: true
           generate_release_notes: true
+          body: |
+            **Install:** download `Quire-Setup-*.exe` below and run it. It installs for your user (no admin rights) and adds Quire to the Start menu.
+            The installer is unsigned: if Windows SmartScreen warns, choose **More info → Run anyway**.
+            To compile PDFs, also install MiKTeX or TeX Live; the sample test suite needs Python 3.9+.
