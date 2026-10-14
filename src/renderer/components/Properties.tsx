@@ -4,7 +4,10 @@ import { MathInput, type MathInputHandle } from './MathInput';
 import { HEADER_FILLS, TABLE_SIZES, TABLE_SPACING, TABLE_STYLES } from '../../shared/latex/table';
 import { editorRef } from '../visual/editorRef';
 import { texToHtml } from '../visual/nodes';
-import { allDiagnostics, api, getRun, gotoSource, guard, mainBlockLines, mainFile, refreshBlock, restoreBlock, setState, unlinkBlock, updateBlockConfig, useStore, latestRun } from '../store';
+import { allDiagnostics, api, getRun, gotoSource, guard, mainBlockLines, mainFile, openTab, refreshBlock, restoreBlock, setState, unlinkBlock, updateBlockConfig, useStore, latestRun } from '../store';
+import { guessHeaderRows, textRows } from '../../shared/latex/grid';
+import { NumberChoice } from './DataTableDialog';
+import { rememberTableStyle } from '../visual/clipboard';
 import { StatusPill, Refresh } from './Icons';
 import { parseCsv } from '../../shared/csv';
 import { editorBlockLines } from '../visual/VisualEditor';
@@ -180,6 +183,7 @@ function GeneratedPanel({ id }: { id: string }) {
     void getRun(cfg.run);
   }, [cfg?.run, cfg?.source]);
   if (!cfg) return <div className="sec"><div className="muted">This generated block has no entry in quire.json.</div></div>;
+  if (cfg.dataFile) return <DataTablePanel id={id} />;
   const rec = cfg.run ? runCache[cfg.run] : null;
   const st = render?.status ?? 'pending';
   const shown = cfg.columns?.length ? cfg.columns : header;
@@ -273,6 +277,88 @@ function GeneratedPanel({ id }: { id: string }) {
         <div className="lbl">Ownership</div>
         <div className="small muted">Values come from the run. To change numbers by hand, convert to static LaTeX; it then stops updating.</div>
         <button className="btn btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => void unlinkBlock(id)}>Convert to static LaTeX…</button>
+      </div>
+    </>
+  );
+}
+
+/** A table linked to a CSV/TSV file in the project (Insert → Table from data file). */
+function DataTablePanel({ id }: { id: string }) {
+  const cfg = useStore((s) => s.project?.manifest.blocks[id])!;
+  const render = useStore((s) => s.renders[id]);
+  const root = useStore((s) => s.project?.root ?? '');
+  const files = useStore((s) => s.project?.files ?? []);
+  const [rows, setRows] = useState<string[][]>([]);
+  useEffect(() => { void api.readText(root, cfg.dataFile!).then((t) => setRows(textRows(t, /\.tsv$/i.test(cfg.dataFile!) ? '\t' : undefined))).catch(() => setRows([])); }, [cfg.dataFile, cfg.refreshedAt]);
+  const detected = guessHeaderRows(rows);
+  const h = cfg.headerRows ?? detected;
+  const names = h ? rows[h - 1] ?? [] : (rows[0] ?? []).map((_, i) => `Column ${i + 1}`);
+  const st = render?.status ?? 'pending';
+  const u = (p: Parameters<typeof updateBlockConfig>[1]) => void updateBlockConfig(id, p);
+  return (
+    <>
+      <div className="sec">
+        <div className="row"><div className="grow"><div className="lbl">Linked table</div><div style={{ fontWeight: 600, fontSize: 14 }}>{cfg.label || id}</div></div>
+          {st === 'fresh' ? <StatusPill status="passed" label="Up to date" /> : <StatusPill status="failed" label={st === 'missing' ? 'Missing' : 'Edited'} />}
+        </div>
+        {render?.message && st !== 'fresh' && <div className="small t-warn">{render.message}</div>}
+      </div>
+      {(st === 'conflict' || st === 'edited') && (
+        <div className="sec" style={{ background: '#FCF1EE' }}>
+          <b style={{ color: '#82260F' }}>Hand edits detected</b>
+          <div className="small">{render?.message} Keep your edit as an editable table, or restore the version built from the file.</div>
+          <div className="row wrap"><button className="btn btn-sm" onClick={() => void unlinkBlock(id)}>Keep edit (unlink)</button><button className="btn btn-sm btn-pri" onClick={() => void restoreBlock(id)}>Restore generated</button></div>
+        </div>
+      )}
+      <div className="sec">
+        <div className="lbl">Data file</div>
+        <select className="field mono" aria-label="Data file" value={cfg.dataFile} onChange={(e) => u({ dataFile: e.target.value, columns: undefined, hiddenColumns: undefined })}>
+          {files.filter((f) => /\.(csv|tsv|txt)$/i.test(f.path) && !f.path.startsWith('runs/')).map((f) => <option key={f.path} value={f.path}>{f.path}</option>)}
+        </select>
+        <div className="small muted">Saved in the file → the table is rewritten (generated/{id}.tex), shown here and used by the next compile.</div>
+        <div className="row wrap">
+          <button className="btn btn-sm" onClick={() => void refreshBlock(id)}><Refresh />Refresh now</button>
+          <button className="btn btn-sm" onClick={() => void openTab(cfg.dataFile!)}>Open data</button>
+          <button className="btn btn-sm" onClick={() => gotoSource(`generated/${id}.tex`, 1)}>View LaTeX</button>
+        </div>
+      </div>
+      <div className="sec">
+        <div className="lbl">Layout</div>
+        <label className="f">Header rows
+          <select className="field" value={cfg.headerRows ?? 'auto'} onChange={(e) => u({ headerRows: e.target.value === 'auto' ? undefined : Number(e.target.value), columns: undefined, hiddenColumns: undefined })}>
+            <option value="auto">Detect ({detected})</option>
+            {[0, 1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}{n > 1 ? ' (multi-level)' : ''}</option>)}
+          </select>
+        </label>
+        <label className="f">Style
+          <select className="field" value={cfg.tableStyle ?? 'booktabs'} onChange={(e) => { rememberTableStyle(e.target.value); u({ tableStyle: e.target.value }); }}>{TABLE_STYLES.map((t) => <option key={t.id} value={t.id} title={t.hint}>{t.label}</option>)}</select>
+        </label>
+        <label className="f">Text size<select className="field" value={cfg.size ?? ''} onChange={(e) => u({ size: e.target.value })}>{TABLE_SIZES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}</select></label>
+        <NumberChoice value={cfg.numberFormat} onChange={(v) => u({ numberFormat: v })} />
+        <label className="chk"><input type="checkbox" checked={!!cfg.sourceLine} onChange={(e) => u({ sourceLine: e.target.checked })} />Print the file name under the table</label>
+        <label className="chk"><input type="checkbox" checked={!!cfg.fitWidth} onChange={(e) => u({ fitWidth: e.target.checked })} />Shrink to text width</label>
+      </div>
+      {names.length > 0 && (
+        <div className="sec">
+          <div className="row" style={{ justifyContent: 'space-between' }}><span className="lbl">Columns</span><span className="small muted">{names.filter((c) => !(cfg.hiddenColumns ?? []).includes(c)).length} of {names.length}</span></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 8px' }}>
+            {names.map((c, i) => (
+              <label key={`${c}-${i}`} className="chk"><input type="checkbox" checked={!(cfg.hiddenColumns ?? []).includes(c)}
+                onChange={(e) => { const hidden = new Set(cfg.hiddenColumns ?? []); if (e.target.checked) hidden.delete(c); else hidden.add(c); u({ hiddenColumns: [...hidden] }); }} />{c || <i className="muted">(blank)</i>}</label>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="sec">
+        <div className="lbl">Caption and label</div>
+        <Debounced label="Caption" multiline value={cfg.caption ?? ''} onCommit={(v) => u({ caption: v })} />
+        <Debounced label="Label" mono value={cfg.label ?? ''} onCommit={(v) => u({ label: v.trim() })} />
+        <RefCount label={cfg.label} />
+      </div>
+      <div className="sec">
+        <div className="lbl">Ownership</div>
+        <div className="small muted">The cells come from the file. To edit them in the document, convert to an editable table; it then stops following the file.</div>
+        <button className="btn btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => void unlinkBlock(id)}>Convert to editable table</button>
       </div>
     </>
   );

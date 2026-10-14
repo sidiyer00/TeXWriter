@@ -74,6 +74,7 @@ function fileMenu(f: ProjectFile, root: string): import('../store').MenuItem[] {
   const img = f.kind === 'image' || f.kind === 'pdf';
   return [
     ...(EDITABLE.has(f.kind) ? [{ label: 'Open', run: () => void openTab(f.path) }] : []),
+    ...(/\.(csv|tsv)$/i.test(f.path) ? [{ label: 'Insert as table…', run: () => setState({ dialog: 'dataTable', dataTableFile: f.path }) }] : []),
     ...(img ? [{ label: 'Insert as figure', run: () => editorRef.current?.chain().focus().insertContent(figureNode(f.path)).run() }] : []),
     { label: 'Open with default app', run: () => void api.openPath(`${root}/${f.path}`) },
     { label: 'Show in folder', run: () => void api.revealInFolder(`${root}/${f.path}`) },

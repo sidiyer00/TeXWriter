@@ -14,7 +14,8 @@ import { cancelRun, listRuns, loadRun, runTests } from './runs';
 import { pdfPath, provenance, writeBundle } from './exporter';
 import { refreshRegistryDirs, toolchain } from './toolchain';
 import { getSettings, projectsDir, saveSettings } from './settings';
-import type { AppSettings } from '../shared/types';
+import type { AppSettings, UserTemplateInput } from '../shared/types';
+import { deleteTemplate, importTemplateFile, listTemplates, saveTemplate, templatesDir } from './userTemplates';
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'quire-file', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: false } },
@@ -198,6 +199,11 @@ function registerIpc() {
     return d;
   });
   handle('createProject', (o: CreateProjectOptions) => createProject(o));
+  handle('listTemplates', () => listTemplates());
+  handle('saveTemplate', (t: UserTemplateInput) => saveTemplate(t));
+  handle('deleteTemplate', (id: string) => deleteTemplate(id));
+  handle('importTemplateFile', (abs: string, name: string) => importTemplateFile(abs, name));
+  handle('openTemplatesFolder', async () => { await fsp.mkdir(templatesDir(), { recursive: true }); const err = await shell.openPath(templatesDir()); if (err) throw new Error(err); });
   handle('createSampleProject', (parent: string) => createSampleProject(parent));
   handle('openProject', (root: string) => loadProject(root));
   handle('reloadProject', (root: string) => loadProject(root));

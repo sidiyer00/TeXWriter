@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Engine, ProjectManifest, ThemeSettings } from '../../shared/types';
 import { FONT_LABELS, PRESETS, themeBlock } from '../../shared/latex/theme';
-import { applyTheme, compileNow, saveManifest, setState, useStore, gotoSource } from '../store';
+import { api, applyTheme, compileNow, guard, promptText, saveManifest, setState, toast, useStore, gotoSource } from '../store';
+import type { UserTemplate } from '../../shared/types';
 import { TitleBar } from '../components/Chrome';
 
 const PREVIEW_FONT: Record<ThemeSettings['bodyFont'], string> = {
@@ -53,6 +54,16 @@ export function SetupScreen() {
   const [t, setT] = useState<ThemeSettings>(project.manifest.theme);
   const [m, setM] = useState<ProjectManifest>(project.manifest);
   useEffect(() => { setT(project.manifest.theme); setM(project.manifest); }, [project.root]);
+  const [styles, setStyles] = useState<UserTemplate[]>([]);
+  const loadStyles = () => void api.listTemplates().then((l) => setStyles(l.filter((x) => x.style && x.theme))).catch(() => setStyles([]));
+  useEffect(loadStyles, []);
+  const saveStyle = async () => {
+    const name = await promptText('Save style', 'Name for this style (page, fonts, spacing, colours, running heads)', `${project.manifest.name} style`);
+    if (!name?.trim()) return;
+    const saved = await guard(() => api.saveTemplate({ name: name.trim(), description: `${FONT_LABELS[t.bodyFont]} · ${t.fontSize} pt · ${t.paper === 'a4' ? 'A4' : 'Letter'}`, layout: false, style: true, baseType: project.manifest.reportType, theme: t }), 'Could not save the style');
+    if (saved) { toast(`Saved style “${saved.name}”. It is offered here and when creating projects.`, 'ok'); loadStyles(); }
+  };
+  const useStyle = (u: UserTemplate) => setT((x) => ({ ...x, ...u.theme!, margins: { ...x.margins, ...u.theme!.margins }, headerLeft: x.headerLeft, preset: 'custom' }));
   const base = project.manifest.theme;
   const changed = useMemo(() => {
     const out: string[] = [];
@@ -85,7 +96,7 @@ export function SetupScreen() {
         </nav>
         <main className="setup-main">
           <section className="sgrp" id="theme">
-            <div><h2>Theme</h2><div className="small muted">A starting point for the settings below.</div></div>
+            <div className="row" style={{ justifyContent: 'space-between' }}><div><h2>Theme</h2><div className="small muted">A starting point for the settings below.</div></div><button className="btn btn-sm" onClick={() => void saveStyle()}>Save as style…</button></div>
             <div role="group" aria-label="Theme preset" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
               {(['classic', 'editorial', 'compact'] as const).map((p) => (
                 <button key={p} className="pcard" aria-pressed={t.preset === p} onClick={() => setT((x) => ({ ...x, ...PRESETS[p], margins: { ...PRESETS[p].margins! } }))}>
@@ -95,6 +106,20 @@ export function SetupScreen() {
                 </button>
               ))}
             </div>
+            {styles.length > 0 && (
+              <div className="col" style={{ gap: 6 }}>
+                <span className="lbl">Your styles</span>
+                <div role="group" aria-label="Saved styles" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+                  {styles.map((u) => (
+                    <button key={u.id} className="pcard" onClick={() => useStyle(u)} title={u.description}>
+                      <span style={{ fontFamily: PREVIEW_FONT[u.theme!.bodyFont], fontSize: 20, fontWeight: 600, lineHeight: 1 }}>Aa</span>
+                      <span style={{ fontWeight: 600, fontSize: 12.5 }}>{u.name}</span>
+                      <span className="small muted">{FONT_LABELS[u.theme!.bodyFont]} · {u.theme!.fontSize} pt · {u.theme!.lineSpread.toFixed(2)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
           <section className="sgrp" id="page">
             <h2>Page layout</h2>
@@ -116,7 +141,7 @@ export function SetupScreen() {
               <label className="f">Body font {ch('bodyFont')}<select className="field" value={t.bodyFont} onChange={(e) => up({ bodyFont: e.target.value as ThemeSettings['bodyFont'] })}>{Object.entries(FONT_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
               <div className="f">Body size {ch('fontSize')}<div className="seg" role="group" aria-label="Body size">{([10, 11, 12] as const).map((s) => <button key={s} aria-pressed={t.fontSize === s} onClick={() => up({ fontSize: s })}>{s} pt</button>)}</div></div>
               <label className="f">Headings {ch('headingFont')}<select className="field" value={t.headingFont} onChange={(e) => up({ headingFont: e.target.value as 'body' | 'sans' })}><option value="body">Same as body, bold</option><option value="sans">Helvetica-style sans</option></select></label>
-              <label className="f">Line spacing {ch('lineSpread')}<select className="field" value={t.lineSpread} onChange={(e) => up({ lineSpread: Number(e.target.value) })}>{[1.0, 1.05, 1.1, 1.2, 1.3, 1.5].map((v) => <option key={v} value={v}>{v.toFixed(2)}</option>)}</select></label>
+              <label className="f">Line spacing {ch('lineSpread')}<select className="field" value={t.lineSpread} onChange={(e) => up({ lineSpread: Number(e.target.value) })}>{[1.0, 1.05, 1.1, 1.2, 1.3, 1.5, 1.6].map((v) => <option key={v} value={v}>{v.toFixed(2)}{v === 1.3 ? ' (≈ one and a half)' : v === 1.6 ? ' (≈ double)' : ''}</option>)}</select></label>
             </div>
             <div className="f">Paragraphs {ch('parSkip')}<div className="seg" role="group" aria-label="Paragraph separation"><button aria-pressed={!t.parSkip} onClick={() => up({ parSkip: false })}>Indent first line</button><button aria-pressed={t.parSkip} onClick={() => up({ parSkip: true })}>Space between</button></div></div>
             <div className="small muted">Fonts come from your TeX distribution (MiKTeX installs missing ones on first use).</div>

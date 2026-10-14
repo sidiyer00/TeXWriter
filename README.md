@@ -156,6 +156,54 @@ same editor when TeXWriter can represent them; anything else stays an editable L
   cell takes the format when you leave the cell. In the LaTeX a formatted cell is
   `\qnum[pct,d1]{0.12345}{12.3\%}`, which prints only the last argument and needs no extra packages.
 - The table toolbar floats over the page, so clicking into a table never shifts the document.
+- **Multi-level headers**: **+ Header level** (table toolbar or right-click → Table) adds a header
+  row above the table; select the cells a group label covers and **Merge cells**. Merged header
+  cells print as `\multicolumn` with `\cmidrule` (booktabs, striped) or `\cline` (minimal,
+  boxed); a header cell merged down uses `\multirow`, and grid/lines rules skip it.
+
+### Spreadsheets and CSV files
+
+- **Paste from Excel, Google Sheets or Numbers** (Ctrl+V) anywhere in the visual editor: the range
+  becomes an editable table. Merged cells are kept, so a two-row "group / column" header pastes as
+  a multi-level header; header rows are detected (all-text rows above numeric data). Comma- or
+  semicolon-separated text with the same number of fields on every line is converted too; prose
+  with commas is not. The toast offers **Paste as text**, and **Ctrl+Shift+V** always pastes plain
+  text. Pasted into an existing table, tab-separated cells fill the table from the cursor.
+- **Pick the style** from the Table toolbar's style menu (Booktabs, Striped, Horizontal lines,
+  Minimal, Boxed, Grid, Plain). New pasted and converted tables use the last style you picked.
+- **Copy to Excel**: Ctrl+C on selected cells or a whole table puts tab-separated text on the
+  clipboard, one value per cell. **Copy table for Excel** (table toolbar → More, or right-click →
+  Table) also writes an HTML table, so Excel and Sheets keep merged header cells.
+- **Paste into the LaTeX pane**: spreadsheet cells pasted into a `.tex` file become a `tabular`.
+- **Tables from CSV files**: Insert → **Table from data file (CSV)…**, or right-click a `.csv` in
+  the Files tab → Insert as table. Choose header rows (or let them be detected), style, text size
+  and a number format (e.g. 2 decimals with thousands separators; the full value is kept in
+  `\qnum`). **Linked** (the default) writes `generated/<id>.tex` and inserts
+  ```latex
+  % quire:generated id=tab_grades_2025
+  \input{generated/tab_grades_2025.tex}
+  % quire:end
+  ```
+  The table is rewritten whenever the CSV changes on disk (re-export from Python, R or Excel and it
+  follows), and before each compile. Its Properties panel picks columns, style, header rows,
+  number format, caption and label; **Convert to editable table** unlinks it. **Editable copy**
+  converts the file once into an ordinary table. CSV, TSV and semicolon-separated files work.
+
+### Templates
+
+- **Built-in**: model risk (validation, documentation, monitoring, performance review), academic
+  (journal article, conference paper in two columns, working paper with JEL codes, thesis or
+  dissertation on the `report` class with chapters, APA 7 paper, research proposal) and general
+  (technical report, blank). Each sets its class, citation style (numbered or author–year),
+  numbering and Document setup values (font, size, spacing, margins).
+- **Your own**: File → **Save as template…** keeps the current project's **layout** (class,
+  preamble, `.sty`/`.cls` files, front matter and headings; either the structure with placeholder
+  text or all the text) and/or its **style** (Document setup values). Document setup → **Save as
+  style…** saves just the style; saved styles appear next to the built-in themes. Home → Your
+  templates → **Import .tex template…** turns a journal's or university's `.tex` file (plus the
+  class, style and `.bst` files next to it) into a template; its class options are left alone.
+  New projects from a template get the new title and author filled in. Templates are JSON files in
+  `%APPDATA%\Quire\templates`; copy one into a colleague's folder to share it.
 
 ## Keyboard and window
 
@@ -201,6 +249,8 @@ TeXWriter/
 `npm run typecheck` and `npm test` run the type check and unit tests. `npm run build && npm run
 e2e` drives the app through the full workflow (sample → run → insert → split edit → compile →
 tables and number formats → comments → setup) and writes screenshots to `e2e-shots/`.
+`npm run e2e:tables` covers spreadsheet paste/copy, CSV-linked tables and templates, compiling
+each new template.
 
 ## Known limits (v0.2.3)
 

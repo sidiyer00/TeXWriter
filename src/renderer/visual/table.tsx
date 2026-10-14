@@ -13,6 +13,7 @@ import { RichInline } from './nodes';
 import { cellNumber, inlinePlain, numberNodes } from '../../shared/latex/table';
 import { decodeFormat, encodeFormat, parseNumberText, type NumFormat } from '../../shared/latex/numfmt';
 import type { JNode } from '../../shared/latex/model';
+import { rememberTableStyle } from './clipboard';
 
 const cellAttrs = {
   background: {
@@ -277,6 +278,7 @@ export function tableBlockAt(ed: Editor): { pos: number; node: import('@tiptap/p
 export function setTableBlockAttrs(ed: Editor, patch: Record<string, unknown>) {
   const tb = tableBlockAt(ed);
   if (!tb) return;
+  if (typeof patch.style === 'string') rememberTableStyle(patch.style);
   ed.view.dispatch(ed.state.tr.setNodeMarkup(tb.pos, undefined, { ...tb.node.attrs, ...patch }));
 }
 
@@ -316,4 +318,33 @@ export function syncColumnCount(ed: Editor) {
   if (spec.length === width) return;
   while (spec.length < width) spec.push('r');
   ed.view.dispatch(ed.state.tr.setNodeMarkup(tb.pos, undefined, { ...tb.node.attrs, cols: spec.slice(0, width).join(' ') }));
+}
+
+/**
+ * Add a header level: a new header row above the current top row, ready for group labels.
+ * Select the cells a label should span and Merge cells; the LaTeX gets \\multicolumn and a
+ * partial rule (\\cmidrule or \\cline) under it.
+ */
+export function addHeaderLevel(ed: Editor) {
+  const tb = tableBlockAt(ed);
+  if (!tb) return;
+  // first cell of the table: tableBlock > table > row > cell > paragraph
+  const cellPos = tb.pos + 3;
+  const first = ed.state.doc.nodeAt(cellPos);
+  if (!first) return;
+  const tr = ed.state.tr.setSelection(TextSelection.create(ed.state.doc, cellPos + 2));
+  ed.view.dispatch(tr);
+  if (first.type.name === 'tableHeader') ed.chain().focus().addRowBefore().run();
+  else {
+    // no header yet: add a row and make it the header
+    ed.chain().focus().addRowBefore().run();
+    const pos = tableBlockAt(ed);
+    if (pos) {
+      ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, pos.pos + 5)));
+      selectColumnOrRow(ed, 'row');
+      ed.chain().focus().toggleHeaderCell().run();
+    }
+  }
+  const after = tableBlockAt(ed);
+  if (after) ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, after.pos + 5)));
 }

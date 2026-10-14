@@ -359,7 +359,7 @@ export function parseTableBlock(src: string): JNode | null {
   const n = spec.cols.length;
   const anyBar = spec.bars.some(Boolean);
   const outerOnly = n > 1 && spec.bars[0] && spec.bars[n] && spec.bars.slice(1, n).every((b) => !b);
-  const everyRow = parsed.rulesBefore.every((r) => r.includes('hline'));
+  const everyRow = parsed.rulesBefore.every((r) => r.includes('hline') || r.includes('cline'));
   const style: TableStyle = anyBar ? (outerOnly ? 'boxed' : 'grid')
     : striped ? 'striped'
     : k.has('toprule') || k.has('bottomrule') || k.has('midrule') ? 'booktabs'
@@ -416,6 +416,24 @@ export function serializeTableBlock(node: JNode): string {
   const fill = String(a.headerFill || '').replace(/^#/, '');
   const fillCmd = fill ? (HEXRE.test(fill) ? `\\rowcolor[HTML]{${fill.toUpperCase()}} ` : `\\rowcolor{${fill}} `) : '';
   const at = (r: number, c: number) => placed.find((p) => p.r === r && p.c === c);
+  // a rule under row r: \hline, or \cline segments that skip cells merged down into row r+1
+  const fullRule = (r: number) => {
+    const open = new Set<number>();
+    for (const q of placed) {
+      const rs = Math.max(1, Number(q.cell.attrs?.rowspan ?? 1));
+      if (q.r <= r && r < q.r + rs - 1) for (let k = 0; k < Math.max(1, Number(q.cell.attrs?.colspan ?? 1)); k++) open.add(q.c + k);
+    }
+    if (!open.size) return '\\hline';
+    const segs: string[] = [];
+    for (let c = 0; c < ncols; c++) {
+      if (open.has(c)) continue;
+      let e = c;
+      while (e + 1 < ncols && !open.has(e + 1)) e++;
+      segs.push(`\\cline{${c + 1}-${e + 1}}`);
+      c = e;
+    }
+    return segs.join(' ');
+  };
   const lines: string[] = [];
   const top = booktabsLike ? '\\toprule' : style === 'grid' || style === 'boxed' || style === 'lines' ? '\\hline' : '';
   if (top) lines.push(`    ${top}`);
@@ -454,11 +472,13 @@ export function serializeTableBlock(node: JNode): string {
     lines.push(`    ${r < headerRows ? fillCmd : ''}${parts.join(' & ')} \\\\`);
     // rules after this row
     const last = r === rows.length - 1;
-    if (r < headerRows - 1 && booktabsLike) {
-      const cm = placed.filter((q) => q.r === r && Number(q.cell.attrs?.colspan ?? 1) > 1).map((q) => `\\cmidrule(lr){${q.c + 1}-${q.c + Number(q.cell.attrs?.colspan)}}`);
+    if (r < headerRows - 1 && (booktabsLike || style === 'minimal' || style === 'boxed')) {
+      // multi-level headers: a partial rule under each header cell that spans columns
+      const spans = placed.filter((q) => q.r === r && Number(q.cell.attrs?.colspan ?? 1) > 1 && Number(q.cell.attrs?.rowspan ?? 1) <= headerRows - 1 - r);
+      const cm = spans.map((q) => booktabsLike ? `\\cmidrule(lr){${q.c + 1}-${q.c + Number(q.cell.attrs?.colspan)}}` : `\\cline{${q.c + 1}-${q.c + Number(q.cell.attrs?.colspan)}}`);
       if (cm.length) lines.push(`    ${cm.join(' ')}`);
     }
-    if (style === 'grid' || style === 'lines') lines.push('    \\hline');
+    if (style === 'grid' || style === 'lines') lines.push(`    ${fullRule(r)}`);
     else if (last) { if (booktabsLike) lines.push('    \\bottomrule'); else if (style === 'boxed') lines.push('    \\hline'); }
     else if (r === headerRows - 1) { if (booktabsLike) lines.push('    \\midrule'); else if (style === 'minimal' || style === 'boxed') lines.push('    \\hline'); }
   }

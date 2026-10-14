@@ -10,6 +10,8 @@ import { SetupScreen } from './views/Setup';
 import { SettingsScreen } from './views/Settings';
 import { Toast } from './components/Chrome';
 import { ContextMenu } from './components/Menu';
+import { DataTableDialog } from './components/DataTableDialog';
+import { SaveTemplateDialog } from './components/TemplateDialogs';
 import { AboutDialog, EquationModal, InsertTableDialog, NumberFormatDialog, PickerDialog, PromptDialog, QuickOpen, ShortcutsDialog } from './components/Dialogs';
 import { followAtCursor, initZoom, insertEquation, insertInlineMath, insertLink, newComment, nextIssue, openFind, setZoom, zoomBy } from './commands';
 import { findKey, step } from './visual/find';
@@ -138,6 +140,8 @@ export function App() {
       <PromptDialog />
       <PickerDialog />
       <InsertTableDialog />
+      <DataTableDialog />
+      <SaveTemplateDialog />
       <NumberFormatDialog />
       <QuickOpen />
       <ShortcutsDialog />

@@ -7,7 +7,7 @@ import type {
 import { parseDocument, toDocJson, serializeDocument, blockLines, ParsedDocument } from '../shared/latex/blocks';
 import { parseBib, BibEntry, numberDocument, LabelInfo, OutlineItem } from '../shared/latex/refs';
 import { parseCsv } from '../shared/csv';
-import { renderTable, renderSummary, renderFigure, BlockView, blockStatus } from '../shared/generate';
+import { renderTable, renderSummary, renderFigure, renderDataTable, BlockView, blockStatus } from '../shared/generate';
 import { hash } from '../shared/latex/scan';
 import { closest } from '../shared/latex/log';
 import type { JNode } from '../shared/latex/model';
@@ -82,7 +82,9 @@ export interface State {
   spell: SpellInfo | null;
   quickOpen: boolean;
   equationModal: { pos: number; inline: boolean } | null;
-  dialog: 'insertTable' | 'numberFormat' | 'shortcuts' | 'about' | null;
+  dialog: 'insertTable' | 'numberFormat' | 'shortcuts' | 'about' | 'dataTable' | 'saveTemplate' | null;
+  /** data file preselected in Insert → Table from data file */
+  dataTableFile: string | null;
   prompt: { title: string; label: string; value: string; resolve: (v: string | null) => void } | null;
   picker: 'cite' | 'ref' | null;
   /** bumps when the visual editor instance changes */
@@ -106,7 +108,7 @@ const initial: State = {
   bib: [], labels: new Map(), outline: [], numbers: new Map(), renders: {}, externalChange: null, toast: null,
   selectedRun: null, selectedTest: null, reviewPage: 1, reviewIssue: null, jump: null, pdfJump: null, insertAfter: null,
   settings: null, openTabs: [], panel: { open: false, tab: 'properties' }, find: null, comments: [], activeComment: null, draftComment: null,
-  contextMenu: null, spell: null, quickOpen: false, equationModal: null, dialog: null, prompt: null, picker: null, editorTick: 0,
+  contextMenu: null, spell: null, quickOpen: false, equationModal: null, dialog: null, dataTableFile: null, prompt: null, picker: null, editorTick: 0,
 };
 
 let state: State = initial;
@@ -219,6 +221,7 @@ async function onDiskChange(rel: string) {
   const f = state.files[rel];
   if (rel === 'quire.json') return;
   if (rel === COMMENTS_FILE) { void loadComments(); return; }
+  if (state.project && Object.values(manifest().blocks).some((b) => b.dataFile === rel)) void refreshDataTables(rel);
   if (!f) { void refreshFileList(); return; }
   let disk: string;
   try { disk = await api.readText(root(), rel); } catch { return; }
@@ -359,6 +362,11 @@ export function blockNode(id: string): JNode | undefined {
 }
 
 async function renderFor(cfg: GeneratedBlockConfig, runNo: number): Promise<{ tex: string; view: BlockView; hash: string } | { error: string }> {
+  if (cfg.dataFile) {
+    let text: string;
+    try { text = await api.readText(root(), cfg.dataFile); } catch { return { error: `${cfg.dataFile} was not found in the project` }; }
+    try { return renderDataTable(cfg, text); } catch (e) { return { error: (e as Error).message }; }
+  }
   const rec = await getRun(runNo);
   if (!rec) return { error: `Run #${runNo} not found` };
   if (cfg.kind === 'summary') {
@@ -381,24 +389,50 @@ export async function refreshBlock(id: string, runNo?: number, persist = true): 
   const m = manifest();
   const cfg = m.blocks[id];
   if (!cfg) return false;
-  const n = runNo ?? latestRun()?.number;
-  if (!n) { toast('Run the test suite first.', 'err'); return false; }
-  const r = await renderFor(cfg, n);
+  const n = cfg.dataFile ? 0 : runNo ?? latestRun()?.number;
+  if (!n && !cfg.dataFile) { toast('Run the test suite first.', 'err'); return false; }
+  const r = await renderFor(cfg, n ?? 0);
   if ('error' in r) {
     setState((s) => ({ renders: { ...s.renders, [id]: { ...(s.renders[id] ?? { view: null }), status: 'missing', message: r.error } } }));
     return false;
   }
+  // a data-linked table whose file and settings did not change keeps its file untouched
+  let same = false;
+  if (cfg.dataFile && cfg.renderedHash === r.hash) {
+    try { same = hash(await api.readText(root(), `generated/${id}.tex`)) === r.hash; } catch { /* missing: write it */ }
+  }
+  if (same) {
+    setState((s) => ({ renders: { ...s.renders, [id]: { view: r.view, status: 'fresh', texHash: r.hash } } }));
+    return true;
+  }
   await api.writeText(root(), `generated/${id}.tex`, r.tex);
-  m.blocks[id] = { ...cfg, run: n, refreshedAt: new Date().toISOString(), renderedHash: r.hash };
+  m.blocks[id] = { ...cfg, run: n ?? 0, refreshedAt: new Date().toISOString(), renderedHash: r.hash };
   if (persist) await saveManifest({ ...m });
   setState((s) => ({ renders: { ...s.renders, [id]: { view: r.view, status: 'fresh', texHash: r.hash } } }));
   return true;
+}
+
+/** Rewrite the tables linked to a data file that just changed on disk. */
+async function refreshDataTables(rel: string) {
+  let n = 0;
+  for (const cfg of Object.values(manifest().blocks)) {
+    const st = state.renders[cfg.id]?.status;
+    if (cfg.dataFile !== rel || st === 'conflict' || st === 'edited') continue;
+    if (await refreshBlock(cfg.id, undefined, false)) n++;
+  }
+  if (n) await saveManifest({ ...manifest() });
 }
 
 export async function refreshStale(): Promise<number> {
   const latest = latestRun()?.number ?? null;
   let n = 0;
   for (const cfg of Object.values(manifest().blocks)) {
+    const st = state.renders[cfg.id]?.status;
+    if (cfg.dataFile) {
+      // refreshBlock leaves an unchanged table alone; count only rewrites
+      if (st !== 'conflict' && st !== 'edited' && await refreshBlock(cfg.id, undefined, false) && manifest().blocks[cfg.id]?.renderedHash !== cfg.renderedHash) n++;
+      continue;
+    }
     if (latest && cfg.followLatest && cfg.run !== latest && cfg.run !== 0 && state.renders[cfg.id]?.status !== 'conflict' && state.renders[cfg.id]?.status !== 'edited') {
       if (await refreshBlock(cfg.id, latest, false)) n++;
     }
@@ -412,6 +446,7 @@ export async function renderAllBlocks() {
   if (!state.project) return;
   const latest = latestRun()?.number ?? null;
   const out: Record<string, BlockRender> = {};
+  const dataChanged: string[] = [];
   for (const cfg of Object.values(manifest().blocks)) {
     const node = blockNode(cfg.id);
     const expectInner = `\\input{generated/${cfg.id}.tex}`;
@@ -419,7 +454,7 @@ export async function renderAllBlocks() {
       out[cfg.id] = { view: null, status: 'conflict', message: 'The LaTeX between the generated markers was edited by hand.' };
       continue;
     }
-    if (cfg.run === 0) { out[cfg.id] = { view: null, status: 'pending', message: 'Pending first test run' }; continue; }
+    if (cfg.run === 0 && !cfg.dataFile) { out[cfg.id] = { view: null, status: 'pending', message: 'Pending first test run' }; continue; }
     const r = await renderFor(cfg, cfg.run);
     if ('error' in r) { out[cfg.id] = { view: null, status: 'missing', message: r.error }; continue; }
     let onDisk = '';
@@ -428,16 +463,23 @@ export async function renderAllBlocks() {
       out[cfg.id] = { view: r.view, status: 'edited', message: `generated/${cfg.id}.tex was edited outside Quire.` };
       continue;
     }
-    out[cfg.id] = { view: r.view, status: blockStatus(cfg, latest), texHash: r.hash };
+    // the data file changed since the table was written: rewrite it
+    if (cfg.dataFile && (!onDisk || hash(onDisk) !== r.hash)) dataChanged.push(cfg.id);
+    out[cfg.id] = { view: r.view, status: cfg.dataFile ? 'fresh' : blockStatus(cfg, latest), texHash: r.hash };
   }
   setState({ renders: out });
+  if (dataChanged.length) {
+    for (const id of dataChanged) await refreshBlock(id, undefined, false);
+    await saveManifest({ ...manifest() });
+  }
 }
 
 export async function updateBlockConfig(id: string, patch: Partial<GeneratedBlockConfig>) {
   const m = manifest();
   m.blocks[id] = { ...m.blocks[id], ...patch };
   await saveManifest({ ...m });
-  if (m.blocks[id].run > 0) await refreshBlock(id, m.blocks[id].run);
+  if (m.blocks[id].dataFile) await refreshBlock(id);
+  else if (m.blocks[id].run > 0) await refreshBlock(id, m.blocks[id].run);
   derive();
 }
 
@@ -455,10 +497,11 @@ export async function unlinkBlock(id: string) {
   doc.content![idx] = { type: 'rawBlock', attrs: { latex: inner, label: 'Static copy', src: null, sig: null, gap: node.attrs?.gap ?? '\n\n' } };
   writeMainDoc(doc);
   const m = manifest();
+  const cfg = m.blocks[id];
   delete m.blocks[id];
   await saveManifest({ ...m });
   await renderAllBlocks();
-  toast('Converted to static LaTeX. It no longer updates from test runs.');
+  toast(cfg?.dataFile ? `Converted to an editable table. It no longer follows ${cfg.dataFile}.` : 'Converted to static LaTeX. It no longer updates from test runs.');
 }
 
 export async function restoreBlock(id: string) {
