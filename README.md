@@ -22,9 +22,9 @@ Installers are built by GitHub Actions on a Windows runner (`.github/workflows/i
 not checked into the repository:
 - **Every push or pull request** builds the installer, installs it silently as a smoke test, and
   attaches it to the run: Actions → *Windows installer* → the run → **Artifacts**.
-- **A release**: set `version` in `package.json`, commit, then push a matching tag
-  (`git tag v0.2.4 && git push origin v0.2.4`). The workflow publishes the installer as a GitHub
-  Release.
+- **Releases**: every push to `main` publishes the installer on the GitHub Release
+  `v<version>` (the `version` in `package.json`), creating the release and tag if needed. Bump the
+  version for a new release; without a bump the installer on the current release is refreshed.
 - **Locally on Windows**: `npm install && npm run dist` writes `release\Quire-Setup-<version>.exe`.
   (Cross-building from Linux needs a full 32-bit Wine setup; use the workflow instead.)
 
