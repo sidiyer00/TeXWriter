@@ -12,10 +12,21 @@ results into the report as linked tables, figures and sentences, and compile a r
 ## Install and run
 
 ### Option A — installer
-Run `release\Quire-Setup-0.2.3.exe` (build it with `npm run dist`; installers are not checked
-in). The build is unsigned, so Windows SmartScreen may warn you; choose **More info → Run
-anyway**. Installing over an older version keeps your settings and projects. No desktop shortcut
-is created; use the Start menu.
+Download `Quire-Setup-<version>.exe` from the repository's **Releases** page and run it. The
+installer is per-user (no admin rights needed), lets you choose the install folder, and adds a
+Start menu entry; no desktop shortcut is created. Installing over an older version keeps your
+settings and projects. The build is unsigned, so Windows SmartScreen may warn you; choose
+**More info → Run anyway**.
+
+Installers are built by GitHub Actions on a Windows runner (`.github/workflows/installer.yml`),
+not checked into the repository:
+- **Every push or pull request** builds the installer, installs it silently as a smoke test, and
+  attaches it to the run: Actions → *Windows installer* → the run → **Artifacts**.
+- **A release**: set `version` in `package.json`, commit, then push a matching tag
+  (`git tag v0.2.4 && git push origin v0.2.4`). The workflow publishes the installer as a GitHub
+  Release.
+- **Locally on Windows**: `npm install && npm run dist` writes `release\Quire-Setup-<version>.exe`.
+  (Cross-building from Linux needs a full 32-bit Wine setup; use the workflow instead.)
 
 ### Option B — from source
 Requires Node.js 20 or newer.
@@ -25,7 +36,7 @@ git clone https://github.com/sidiyer00/TeXWriter.git
 cd TeXWriter
 npm install          # downloads Electron (~100 MB) the first time
 npm run dev          # development build with hot reload
-npm run dist         # build release\Quire-Setup-<version>.exe
+npm run dist         # build the installer: release\Quire-Setup-<version>.exe
 ```
 
 ### Prerequisites for compiling and tests
@@ -263,5 +274,5 @@ each new template.
   still compile.
 - When a theme font is missing, TeXWriter falls back to Computer Modern and lists the missing
   package as a notice.
-- The installer is unsigned and there is no auto-update yet. No PDF/A output; the provenance
+- The installer is unsigned (SmartScreen warns on first run) and there is no auto-update yet. No PDF/A output; the provenance
   manifest records SHA-256 hashes of every source behind the PDF.
