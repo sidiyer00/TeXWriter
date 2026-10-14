@@ -1,5 +1,5 @@
-import type { QuireApi } from '../shared/types';
+import type { TeXWriterApi } from '../shared/types';
 declare global {
-  interface Window { quire: QuireApi }
+  interface Window { texwriter: TeXWriterApi }
 }
 export {};

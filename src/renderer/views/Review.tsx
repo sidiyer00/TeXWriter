@@ -1,7 +1,7 @@
 // PDF review: compiled preview, page navigation, linked diagnostics and export.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Diagnostic, SyncTexForward } from '../../shared/types';
-import { allDiagnostics, api, compileNow, gotoSource, guard, mainFile, refreshBlock, renderAllBlocks, replaceKey, restoreBlock, setState, toast, updateBlockConfig, useStore, getState } from '../store';
+import { allDiagnostics, api, compileNow, gotoSource, guard, mainFile, replaceKey, restoreBlock, runGenerator, setState, showBlock, toast, updateBlockConfig, useStore, getState } from '../store';
 import { BackButton, CompileButton, TitleBar } from '../components/Chrome';
 import { Check, Download, Left, Right, Warn, X } from '../components/Icons';
 import { loadPdf, pageLinks, renderPage, type PDFDocumentProxy, type PdfLink } from '../pdf';
@@ -81,7 +81,11 @@ function IssueActions({ d }: { d: Diagnostic }) {
     gotoSource(bib, cur.split('\n').length + 2);
   } });
   if (d.kind === 'overfull' && genFile && blocks[genFile]) acts.push({ label: 'Shrink table to text width', pri: true, run: () => void updateBlockConfig(genFile, { fitWidth: true }).then(() => toast('Table set to fit the text width. Recompile to check.', 'ok')) });
-  if (d.kind === 'stale-block' && d.blockId) acts.push({ label: 'Refresh from latest run', pri: true, run: () => void refreshBlock(d.blockId!).then(() => renderAllBlocks()) });
+  if (d.kind === 'stale-block' && d.blockId) {
+    const b = blocks[d.blockId];
+    if (b?.script) acts.push({ label: `Run ${b.script.split('/').pop()}`, pri: true, run: () => void runGenerator(d.blockId!) });
+    acts.push({ label: 'Show block', run: () => showBlock(d.blockId!) });
+  }
   if (d.kind === 'block-conflict' && d.blockId) acts.push({ label: 'Restore generated', run: () => void restoreBlock(d.blockId!) });
   if (d.kind === 'missing-file' && d.key && /\.(sty|cls)$/.test(d.key)) acts.push({ label: 'How to install', run: () => toast(`Install the package that provides ${d.key} with the MiKTeX Console (Packages) or tlmgr install, then recompile.`) });
   if (d.line) acts.push({ label: 'Go to source', run: () => gotoSource(d.file ?? mainFile(), d.line) });
@@ -113,12 +117,12 @@ export function ReviewScreen() {
   useEffect(() => {
     let cancelled = false;
     setErr(null);
-    const rel = `.quire/build/${project.manifest.mainFile.replace(/\.tex$/, '.pdf')}`;
+    const rel = `.texwriter/build/${project.manifest.mainFile.replace(/\.tex$/, '.pdf')}`;
     api.readBinary(project.root, rel).then(loadPdf).then((d) => { if (!cancelled) setDoc(d); }).catch(() => { if (!cancelled) { setDoc(null); setErr('No PDF yet'); } });
     return () => { cancelled = true; };
   }, [pdfVersion, project.root]);
 
-  useEffect(() => { void api.readText(project.root, `.quire/build/${project.manifest.mainFile.replace(/\.tex$/, '.log')}`).then(setLog).catch(() => setLog(lastCompile?.log ?? '')); }, [pdfVersion, lastCompile]);
+  useEffect(() => { void api.readText(project.root, `.texwriter/build/${project.manifest.mainFile.replace(/\.tex$/, '.log')}`).then(setLog).catch(() => setLog(lastCompile?.log ?? '')); }, [pdfVersion, lastCompile]);
 
   // locate diagnostics on pages via SyncTeX
   useEffect(() => {
@@ -262,12 +266,12 @@ export function ReviewScreen() {
               <div className="sec">
                 <div className="lbl">Export</div>
                 {diags.some((d) => d.kind === 'undefined-reference' || d.kind === 'undefined-citation') && <div className="small t-warn">Unresolved references will print as “??” unless fixed.</div>}
-                {diags.some((d) => d.kind === 'stale-block') && <div className="small t-warn">Some generated content is from an older run.</div>}
+                {diags.some((d) => d.kind === 'stale-block') && <div className="small t-warn">Some generated tables or figures have not been generated, or their script failed.</div>}
                 <button className="btn btn-pri" disabled={!doc} onClick={() => void exp('pdf')}><Download />Export PDF{pages ? ` · ${pages} pages` : ''}</button>
                 <button className="btn" onClick={() => void exp('zip')}>Source bundle (.zip)</button>
                 <div className="small muted">Report sources, bibliography, figures, generated tables, the runs they came from, the PDF and a PROVENANCE.json manifest.</div>
                 <button className="btn" onClick={() => void exp('prov')}>Provenance (.json)</button>
-                <div className="small muted">Test runs, commits and SHA-256 hashes of every source behind the PDF.</div>
+                <div className="small muted">Scripts, their last runs and SHA-256 hashes of every source and output behind the PDF.</div>
               </div>
             )}
           </div>

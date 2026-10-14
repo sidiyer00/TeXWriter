@@ -7,7 +7,7 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 export interface FindQuery { text: string; caseSensitive: boolean; wholeWord: boolean; regex: boolean }
 interface FindState { query: FindQuery | null; matches: { from: number; to: number }[]; current: number; deco: DecorationSet }
 
-export const findKey = new PluginKey<FindState>('quire-find');
+export const findKey = new PluginKey<FindState>('texwriter-find');
 
 /** Text of every textblock with a map from string offsets to document positions. */
 export function textIndex(doc: PMNode): { text: string; pos: number[] }[] {
@@ -58,7 +58,7 @@ function decorate(doc: PMNode, matches: { from: number; to: number }[], current:
 }
 
 export const Find = Extension.create({
-  name: 'quireFind',
+  name: 'texwriterFind',
   addProseMirrorPlugins() {
     return [new Plugin<FindState>({
       key: findKey,

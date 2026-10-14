@@ -1,16 +1,15 @@
 import { Component, useEffect, type ReactNode } from 'react';
-import { api, compileNow, getState, loadSettings, loadToolchain, runTests, saveAll, setState, toast, togglePanel, useStore } from './store';
+import { api, compileNow, getState, loadSettings, loadToolchain, runAllGenerators, saveAll, setState, toast, togglePanel, useStore } from './store';
 import { flushVisual } from './visual/VisualEditor';
 import { editorRef } from './visual/editorRef';
 import { Home } from './views/Home';
 import { EditorScreen } from './views/Editor';
-import { TestsScreen } from './views/Tests';
 import { ReviewScreen } from './views/Review';
 import { SetupScreen } from './views/Setup';
 import { SettingsScreen } from './views/Settings';
 import { Toast } from './components/Chrome';
 import { ContextMenu } from './components/Menu';
-import { DataTableDialog } from './components/DataTableDialog';
+import { GeneratedDialog } from './components/GeneratedDialog';
 import { SaveTemplateDialog } from './components/TemplateDialogs';
 import { AboutDialog, EquationModal, InsertTableDialog, NumberFormatDialog, PickerDialog, PromptDialog, QuickOpen, ShortcutsDialog } from './components/Dialogs';
 import { followAtCursor, initZoom, insertEquation, insertInlineMath, insertLink, newComment, nextIssue, openFind, setZoom, zoomBy } from './commands';
@@ -65,7 +64,7 @@ function onKey(e: KeyboardEvent) {
   if (mod && e.key === 'Enter') { stop(); void compileNow(); return; }
   if (mod && !e.shiftKey && k === 's') { stop(); void saveAll().then(() => toast('All changes saved.', 'ok')); return; }
   if (mod && !e.shiftKey && !e.altKey && k === 'o') { stop(); setState({ quickOpen: true }); return; }
-  if (mod && e.shiftKey && k === 't') { stop(); void runTests(); return; }
+  if (mod && e.shiftKey && k === 'g') { stop(); void runAllGenerators(); return; }
   if (mod && !e.shiftKey && !e.altKey && ['1', '2', '3'].includes(e.key)) { stop(); setState({ view: 'editor', mode: e.key === '1' ? 'visual' : e.key === '2' ? 'split' : 'source' }); return; }
   if (mod && e.key === '\\') { stop(); setState({ navOpen: !s.navOpen }); return; }
   if (mod && e.altKey && k === 'p') { stop(); togglePanel('properties'); return; }
@@ -109,7 +108,7 @@ export function App() {
   }, []);
   useEffect(() => api.onFlush(async () => { flushVisual(); await saveAll(); }), []);
 
-  // installed MiKTeX/Python while Quire was open? Look again when the window regains focus.
+  // installed MiKTeX/Python while TeXWriter was open? Look again when the window regains focus.
   useEffect(() => api.onWindowFocus(() => {
     const tc = getState().toolchain;
     if (tc?.engines.pdflatex && tc.python) return;
@@ -117,7 +116,7 @@ export function App() {
       const before = tc;
       setState({ toolchain: n });
       if (!before?.engines.pdflatex && n.engines.pdflatex) toast(`Found ${n.distribution ?? 'TeX'} — compiling is ready.`, 'ok');
-      else if (!before?.python && n.python) toast('Found Python — test suites can run.', 'ok');
+      else if (!before?.python && n.python) toast('Found Python — generator scripts can run.', 'ok');
     }).catch(() => {});
   }), []);
 
@@ -134,13 +133,13 @@ export function App() {
   return (
     <div className="app">
       <ErrorBoundary>
-        {view === 'settings' ? <SettingsScreen /> : !project || view === 'home' ? <Home /> : view === 'tests' ? <TestsScreen /> : view === 'review' ? <ReviewScreen /> : view === 'setup' ? <SetupScreen /> : <EditorScreen />}
+        {view === 'settings' ? <SettingsScreen /> : !project || view === 'home' ? <Home /> : view === 'review' ? <ReviewScreen /> : view === 'setup' ? <SetupScreen /> : <EditorScreen />}
       </ErrorBoundary>
       <ContextMenu />
       <PromptDialog />
       <PickerDialog />
       <InsertTableDialog />
-      <DataTableDialog />
+      <GeneratedDialog />
       <SaveTemplateDialog />
       <NumberFormatDialog />
       <QuickOpen />

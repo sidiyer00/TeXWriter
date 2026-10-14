@@ -1,9 +1,9 @@
-// Left panel: outline, project files, tests, references.
+// Left panel: outline, project files, generated tables and figures, references.
 import { useMemo, useState } from 'react';
-import { allDiagnostics, api, gotoSource, guard, mainBlockLines, mainFile, openTab, openContextMenu, runTests, setState, useStore, latestRun, getRun, getState } from '../store';
+import { allDiagnostics, api, cancelGenerators, gotoSource, guard, mainBlockLines, mainFile, openTab, openContextMenu, runAllGenerators, runGenerator, setState, showBlock, useStore, getState } from '../store';
 import type { ProjectFile } from '../../shared/types';
 import { Down, Right, Doc, Folder } from './Icons';
-import { Panel, Play, Search, StatusIcon } from './Icons';
+import { Panel, Play, Search } from './Icons';
 import { editorRef } from '../visual/editorRef';
 import { scrollToBlock } from '../visual/VisualEditor';
 import { canonicalBlock } from '../../shared/latex/blocks';
@@ -74,7 +74,11 @@ function fileMenu(f: ProjectFile, root: string): import('../store').MenuItem[] {
   const img = f.kind === 'image' || f.kind === 'pdf';
   return [
     ...(EDITABLE.has(f.kind) ? [{ label: 'Open', run: () => void openTab(f.path) }] : []),
-    ...(/\.(csv|tsv)$/i.test(f.path) ? [{ label: 'Insert as table…', run: () => setState({ dialog: 'dataTable', dataTableFile: f.path }) }] : []),
+    ...(/\.(csv|tsv)$/i.test(f.path) ? [{ label: 'Insert as linked table…', run: () => setState({ dialog: 'generated', generatedInit: { kind: 'table', mode: 'file', file: f.path } }) }] : []),
+    ...(f.kind === 'code' ? [
+      { label: 'Generated table from this script…', run: () => setState({ dialog: 'generated', generatedInit: { kind: 'table', mode: 'script', file: f.path } }) },
+      { label: 'Generated figure from this script…', run: () => setState({ dialog: 'generated', generatedInit: { kind: 'figure', mode: 'script', file: f.path } }) },
+    ] : []),
     ...(img ? [{ label: 'Insert as figure', run: () => editorRef.current?.chain().focus().insertContent(figureNode(f.path)).run() }] : []),
     { label: 'Open with default app', run: () => void api.openPath(`${root}/${f.path}`) },
     { label: 'Show in folder', run: () => void api.revealInFolder(`${root}/${f.path}`) },
@@ -86,7 +90,7 @@ function fileMenu(f: ProjectFile, root: string): import('../store').MenuItem[] {
 function FilesTree() {
   const project = useStore((s) => s.project)!;
   const current = useStore((s) => s.sourceFile);
-  const [closed, setClosed] = useState<Set<string>>(() => new Set(['runs', 'build', '.quire']));
+  const [closed, setClosed] = useState<Set<string>>(() => new Set(['runs', 'build', '.texwriter']));
   const [q, setQ] = useState('');
   const visible = project.files.filter((f) => !q || f.path.toLowerCase().includes(q.toLowerCase()));
   const tree = useMemo(() => buildTree(visible), [visible.map((f) => f.path).join('|')]);
@@ -140,23 +144,59 @@ function FilesTree() {
   );
 }
 
+/** Every generated table and figure in the project, with what it comes from and its state. */
+function GeneratedList() {
+  const blocks = useStore((s) => s.project?.manifest.blocks ?? {});
+  const renders = useStore((s) => s.renders);
+  const gen = useStore((s) => s.generating);
+  const list = Object.values(blocks);
+  const scripted = list.filter((b) => b.script).length;
+  const add = (kind: 'table' | 'figure') => setState({ dialog: 'generated', generatedInit: { kind, mode: 'new' } });
+  return (
+    <div className="col" style={{ padding: '0 4px', gap: 8 }}>
+      <div className="row wrap" style={{ gap: 6 }}>
+        <button className="btn btn-sm" onClick={() => add('table')}>+ Table</button>
+        <button className="btn btn-sm" onClick={() => add('figure')}>+ Figure</button>
+        {gen ? <button className="btn btn-sm" style={{ marginLeft: 'auto' }} onClick={() => cancelGenerators()}>Stop</button>
+          : <button className="btn btn-sm btn-pri" style={{ marginLeft: 'auto' }} disabled={!scripted} onClick={() => void runAllGenerators()}><Play />Run all</button>}
+      </div>
+      {list.length === 0 && (
+        <div className="empty small">
+          <b>No generated tables or figures</b>
+          <span className="muted">A generated table or figure is rebuilt from a file: one a script writes (Python, R, …) or one another program keeps up to date, such as a model's output. Add one with the buttons above; TeXWriter can write a starter script for you.</span>
+        </div>
+      )}
+      {list.map((b) => {
+        const st = gen?.id === b.id ? 'running' : renders[b.id]?.status ?? 'pending';
+        const color = st === 'fresh' ? 'var(--pass)' : st === 'running' ? 'var(--accent)' : st === 'pending' ? '#B9B1A5' : 'var(--fail)';
+        const text = st === 'fresh' ? (b.lastRun ? `ran ${new Date(b.lastRun.at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}` : 'up to date') : st === 'running' ? 'running…' : st === 'pending' ? 'not generated' : st === 'failed' ? 'run failed' : st === 'missing' ? 'can’t build' : 'edited by hand';
+        return (
+          <div key={b.id} className="gen-item">
+            <button className="tree" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 1, padding: '6px 8px', flex: 1, minWidth: 0 }} onClick={() => showBlock(b.id)} title="Show in the document and open its properties">
+              <span className="row" style={{ gap: 6, width: '100%' }}><span className="dot" style={{ background: color }} /><span style={{ fontSize: 12.5, fontWeight: 500 }} className="ellipsis">{b.kind === 'figure' ? 'Figure' : 'Table'} {b.label || b.id}</span></span>
+              <span className="mono small muted ellipsis" style={{ width: '100%' }}>{b.script ?? b.output ?? 'no source'}</span>
+              <span className={`small ${st === 'failed' || st === 'missing' ? 't-fail' : 'muted'}`}>{text}</span>
+            </button>
+            {b.script && <button className="btn btn-q btn-xs" disabled={!!gen} title={`Run ${b.script}`} aria-label={`Run ${b.script}`} onClick={() => void runGenerator(b.id)}><Play /></button>}
+          </div>
+        );
+      })}
+      {list.length > 0 && <div className="small muted" style={{ padding: '4px 4px 0' }}>Click one to see it in the document with its script, output and log. Ctrl+Shift+G runs all scripts.</div>}
+    </div>
+  );
+}
+
 export function Navigator() {
   const tab = useStore((s) => s.navTab);
   const outline = useStore((s) => s.outline);
   const sel = useStore((s) => s.selection);
   const project = useStore((s) => s.project)!;
   const bib = useStore((s) => s.bib);
-  const runs = useStore((s) => s.runs);
-  const runCache = useStore((s) => s.runCache);
-  const running = useStore((s) => s.running);
   const renders = useStore((s) => s.renders);
   const lastCompile = useStore((s) => s.lastCompile);
   const [q, setQ] = useState('');
-  void runs; void lastCompile;
-  const latest = latestRun();
-  const latestRec = latest ? runCache[latest.number] : null;
   const unresolved = useMemo(() => allDiagnostics().filter((d) => d.kind === 'undefined-citation'), [lastCompile, bib]);
-  const staleCount = Object.values(renders).filter((r) => r.status === 'stale').length;
+  const staleCount = Object.values(renders).filter((r) => r.status === 'pending' || r.status === 'failed').length;
   const genCount = Object.keys(project.manifest.blocks).length;
 
   // which outline entry holds the cursor
@@ -170,7 +210,7 @@ export function Navigator() {
   return (
     <aside className="panel-left" aria-label="Project navigator">
       <div className="tabs" role="tablist" aria-label="Navigator">
-        {(['outline', 'files', 'tests', 'refs'] as const).map((t) => (
+        {(['outline', 'files', 'generated', 'refs'] as const).map((t) => (
           <button key={t} className="tab" role="tab" aria-selected={tab === t} onClick={() => setState({ navTab: t })}>{t === 'refs' ? 'Refs' : t[0].toUpperCase() + t.slice(1)}</button>
         ))}
         <button className="btn btn-q ib btn-sm" style={{ marginLeft: 'auto' }} aria-label="Collapse panel (Ctrl+\)" title="Collapse  Ctrl+\" onClick={() => setState({ navOpen: false })}><Panel /></button>
@@ -192,26 +232,7 @@ export function Navigator() {
           ))
         )}
         {tab === 'files' && <FilesTree />}
-        {tab === 'tests' && (
-          <div className="col" style={{ padding: '0 6px', gap: 10 }}>
-            {running && <div className="running-card" role="status"><div className="row"><span className="st run st-sm">Running</span><span className="small">{running.done}/{running.total || '…'}</span></div><div className="small">{running.label}</div><div className={`progress ${running.total ? '' : 'indet'}`}><div style={{ width: `${running.total ? (100 * running.done) / running.total : 30}%` }} /></div></div>}
-            {!latest && !running && <div className="empty small"><b>No test runs yet</b><span className="muted">{project.manifest.tests.command ? 'Run the suite to fill generated tables.' : 'Configure a test command in Document setup → Compiler and tests.'}</span>{project.manifest.tests.command && <button className="btn btn-sm btn-pri" onClick={() => void runTests()}><Play />Run tests</button>}</div>}
-            {latest && (
-              <>
-                <div className="row"><b>Run #{latest.number}</b><span className="small muted">{new Date(latest.startedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span></div>
-                <div className="row small" style={{ gap: 10 }}><span className="t-pass">{latest.counts.passed} passed</span><span className="t-fail">{latest.counts.failed} failed</span><span className="t-warn">{latest.counts.warning} warn</span><span className="t-skip">{latest.counts.skipped} skip</span></div>
-                <div className="small muted">{genCount} generated blocks{staleCount ? ` · ${staleCount} stale` : ''}</div>
-                {(latestRec?.results?.tests ?? []).filter((t) => t.status === 'failed' || t.status === 'warning').map((t) => (
-                  <button key={t.id} className="tree" onClick={() => { void getRun(latest.number); setState({ view: 'tests', selectedRun: latest.number, selectedTest: t.id }); }}>
-                    <span className={t.status === 'failed' ? 't-fail' : 't-warn'}><StatusIcon status={t.status} /></span>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12.5 }}>{t.name}</span>
-                  </button>
-                ))}
-                <div className="row"><button className="btn btn-sm" onClick={() => setState({ view: 'tests' })}>Open test results</button><button className="btn btn-sm" disabled={!!running} onClick={() => void runTests()}><Play />Run</button></div>
-              </>
-            )}
-          </div>
-        )}
+        {tab === 'generated' && <GeneratedList />}
         {tab === 'refs' && (
           <div className="col" style={{ gap: 6 }}>
             <label className="row" style={{ height: 30, padding: '0 8px', border: '1px solid var(--rule)', borderRadius: 6, background: '#fff', color: 'var(--muted-3)', margin: '0 4px' }}>
@@ -231,8 +252,7 @@ export function Navigator() {
         )}
       </div>
       <div style={{ padding: '10px 14px', borderTop: '1px solid var(--rule)', fontSize: 12, color: 'var(--muted-2)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div className="row" style={{ justifyContent: 'space-between' }}><span>Linked test run</span>{latest ? <button className="btn btn-q btn-xs mono" onClick={() => setState({ view: 'tests', selectedRun: latest.number })}>#{latest.number}</button> : <span>—</span>}</div>
-        <div className="row" style={{ justifyContent: 'space-between' }}><span>Generated blocks</span><span>{genCount}{staleCount ? <> · <span className="t-warn">{staleCount} stale</span></> : ''}</span></div>
+        <button className="row btn-q" style={{ justifyContent: 'space-between', border: 0, background: 'none', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer' }} onClick={() => setState({ navTab: 'generated' })}><span>Generated tables and figures</span><span>{genCount}{staleCount ? <> · <span className="t-warn">{staleCount} to run</span></> : ''}</span></button>
       </div>
     </aside>
   );

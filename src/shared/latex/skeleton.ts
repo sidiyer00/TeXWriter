@@ -48,26 +48,30 @@ export function skeletonize(tex: string): string {
 
 const esc = (s: string) => s.replace(/([%&#_$])/g, '\\$1');
 
-/** Replace the argument of the first \cmd{…} in the preamble (title, author…); no-op if absent. */
-function replaceArg(tex: string, cmd: string, value: string): string {
-  const begin = tex.indexOf('\\begin{document}');
-  const head = begin < 0 ? tex : tex.slice(0, begin);
-  const m = new RegExp(`\\\\${cmd}\\s*(\\[[^\\]]*\\])?\\s*\\{`).exec(head);
+/**
+ * Replace the argument of the first \cmd{…} that is not in a comment: in the preamble, or
+ * (journal classes such as IEEEtran and acmart) in the front matter after \begin{document}.
+ */
+function replaceArg(tex: string, cmd: string, value: string, onlyPlain = false): string {
+  const re = new RegExp(`^[^%\\n]*?\\\\${cmd}\\s*(\\[[^\\]]*\\])?\\s*\\{`, 'm');
+  const m = re.exec(tex);
   if (!m) return tex;
   const open = m.index + m[0].length - 1;
   const end = matchGroup(tex, open);
   if (end < 0) return tex;
+  // structured author blocks (\IEEEauthorblockN, \inst, \thanks…) are left for the author to edit
+  if (onlyPlain && /\\[A-Za-z]/.test(tex.slice(open + 1, end - 1).replace(/\\and\b/g, ''))) return tex;
   return tex.slice(0, open + 1) + value + tex.slice(end - 1);
 }
 
 /** Put a new project's title and author into a layout's \title and \author. */
 export function personalize(tex: string, o: { title: string; author?: string }): string {
   let t = replaceArg(tex, 'title', esc(o.title));
-  if (o.author) t = replaceArg(t, 'author', esc(o.author));
+  if (o.author) t = replaceArg(t, 'author', esc(o.author), true);
   return t;
 }
 
-/** Drop generated-content blocks (they belong to one project's test runs and data files). */
+/** Drop generated-content blocks (they belong to one project's scripts and data files). */
 export function stripGenerated(tex: string): string {
   const p = parseDocument(tex);
   if (!p.hasDocument) return tex;

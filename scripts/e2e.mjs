@@ -9,11 +9,11 @@ import electronPath from 'electron';
 
 const out = path.resolve('e2e-shots');
 fs.mkdirSync(out, { recursive: true });
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'quire-e2e-'));
+const home = fs.mkdtempSync(path.join(os.tmpdir(), 'texwriter-e2e-'));
 const app = await electron.launch({
   executablePath: electronPath,
   args: ['.', '--no-sandbox', `--user-data-dir=${path.join(home, 'userdata')}`],
-  env: { ...process.env, HOME: home, XDG_DOCUMENTS_DIR: path.join(home, 'Documents'), QUIRE_SAMPLE_PACE: '0.01' },
+  env: { ...process.env, HOME: home, XDG_DOCUMENTS_DIR: path.join(home, 'Documents'), TEXWRITER_SAMPLE_PACE: '0.01' },
 });
 // HOME/XDG only redirect Documents on Linux; on Windows force it so runs never touch the real folder.
 await app.evaluate(({ app }, d) => app.setPath('documents', d), path.join(home, 'Documents'));
@@ -29,28 +29,93 @@ await step('home', async () => { await win.getByRole('button', { name: 'Open sam
 await step('open-sample', async () => {
   await win.getByRole('button', { name: 'Open sample project' }).first().click();
   await win.locator('.ProseMirror').waitFor({ timeout: 15000 });
+  await win.waitForTimeout(1500);
+  // two blocks wait for their scripts; the one built from a data file is there at once
+  const pending = await win.locator('.blk-gen.pending').count();
+  const fresh = await win.locator('.blk-gen.fresh').count();
+  if (pending !== 2 || fresh !== 1) throw new Error(`expected 2 pending + 1 fresh generated blocks, got ${pending} + ${fresh}`);
   await shot('02-editor-pending');
 });
-await step('run-tests', async () => {
-  await win.getByRole('button', { name: /^Run tests/ }).click();
-  await win.waitForFunction(() => !document.body.innerText.includes('Running '), null, { timeout: 120000 });
+const projDir = () => { const qdir = [path.join(home, 'Documents', 'TeXWriter'), path.join(home, 'TeXWriter')].find((d) => fs.existsSync(d)); return path.join(qdir, fs.readdirSync(qdir)[0]); };
+const projDirOf = projDir;
+const waitIdle = () => win.waitForFunction(() => !window.__texwriterState().generating, null, { timeout: 120000 });
+await step('run-all', async () => {
+  await win.getByRole('button', { name: 'Run all' }).first().click();
+  await win.waitForTimeout(300);
+  await waitIdle();
   await win.waitForTimeout(800);
-  await win.getByRole('button', { name: 'View results' }).click().catch(() => {});
-  await win.getByText('Run #1').first().waitFor({ timeout: 10000 });
-  await win.getByText('Jeffreys test — Grade 7').first().click();
-  await shot('03-tests');
-});
-await step('insert-summary', async () => {
-  await win.locator('.opt', { hasText: 'Summary' }).click();
-  await win.getByRole('button', { name: /^Insert summary$/ }).click();
-  await win.waitForTimeout(600);
-});
-await step('editor-generated', async () => {
-  await win.getByRole('button', { name: /Back to report/ }).click();
-  await win.locator('.blk-gen').first().waitFor();
+  const fresh = await win.locator('.blk-gen.fresh').count();
+  if (fresh !== 3) throw new Error(`after Run all: ${fresh} fresh blocks, ${await win.locator('.blk-gen.failed').count()} failed`);
+  const tab = fs.readFileSync(path.join(projDir(), 'generated', 'tab_coefficients.tex'), 'utf8');
+  if (!/\\qnum\[num,d3\]\{[-\d.]+\}\{0\.7\d\d\}/.test(tab)) throw new Error('coefficient table not generated with 3 decimals');
+  if (!fs.existsSync(path.join(projDir(), 'outputs', 'fit.pdf'))) throw new Error('figure not written');
+  await win.locator('.blk-gen.fresh canvas').first().waitFor({ timeout: 10000 });
   await win.locator('.blk-gen').nth(1).scrollIntoViewIfNeeded();
-  await win.locator('.blk-gen').nth(1).click({ position: { x: 30, y: 30 } });
-  await shot('04-editor-generated');
+  await shot('03-generated');
+});
+await step('generated-tab', async () => {
+  await win.getByRole('tab', { name: 'Generated' }).click();
+  const n = await win.locator('.gen-item').count();
+  if (n !== 3) throw new Error(`Generated tab lists ${n} items`);
+  await shot('04-generated-tab');
+});
+await step('new-generated-table', async () => {
+  await win.locator('.ProseMirror > p').nth(2).click();
+  await win.keyboard.press('End');
+  await win.getByRole('button', { name: '+ Table' }).click();
+  const dlg = win.getByRole('dialog', { name: 'New generated table' });
+  await dlg.getByLabel(/^Label/).fill('tab:groups');
+  await dlg.getByLabel('Caption').fill('Summary statistics by group.');
+  await shot('05-new-generated-dialog');
+  await dlg.getByRole('button', { name: 'Insert and run' }).click();
+  await win.waitForTimeout(500);
+  await waitIdle();
+  await win.waitForTimeout(800);
+  const s = fs.readFileSync(path.join(projDir(), 'scripts', 'tab_groups.py'), 'utf8');
+  if (!s.includes('TEXWRITER_OUTPUT')) throw new Error('starter script not written');
+  const g = fs.readFileSync(path.join(projDir(), 'generated', 'tab_groups.tex'), 'utf8');
+  if (!g.includes('\\label{tab:groups}') || !g.includes('Std. dev.')) throw new Error('new generated table not built');
+  if (!fs.readFileSync(path.join(projDir(), 'report.tex'), 'utf8').includes('\\input{generated/tab_groups.tex}')) throw new Error('block not inserted in the document');
+  await win.locator('.blk-gen', { hasText: 'Summary statistics by group' }).scrollIntoViewIfNeeded();
+  await shot('06-new-generated');
+});
+await step('new-generated-figure', async () => {
+  await win.getByRole('button', { name: '+ Figure' }).click();
+  const dlg = win.getByRole('dialog', { name: 'New generated figure' });
+  await dlg.getByLabel(/^Label/).fill('fig:curve');
+  await dlg.getByLabel('Caption').fill('A damped sine.');
+  await dlg.getByRole('button', { name: 'Insert and run' }).click();
+  await win.waitForTimeout(500);
+  await waitIdle();
+  if (!fs.existsSync(path.join(projDir(), 'outputs', 'fig_curve.pdf'))) throw new Error('starter figure script did not write a PDF');
+});
+await step('failing-script', async () => {
+  const f = path.join(projDir(), 'scripts', 'tab_groups.py');
+  const ok = fs.readFileSync(f, 'utf8');
+  fs.writeFileSync(f, ok.replace('random.seed(1)', 'random.seed(1)\nraise ValueError("bad input data")'));
+  await win.locator('.gen-item', { hasText: 'tab:groups' }).getByRole('button', { name: /^Run / }).click();
+  await win.waitForTimeout(300);
+  await waitIdle();
+  await win.locator('.blk-gen.failed').waitFor({ timeout: 5000 });
+  await win.locator('.gen-item', { hasText: 'tab:groups' }).locator('button').first().click();
+  await win.locator('.panel-right').waitFor();
+  const log = await win.locator('.panel-right .gen-log').innerText();
+  if (!log.includes('ValueError: bad input data')) throw new Error(`log does not show the Python error: ${log.slice(0, 200)}`);
+  await shot('07-failed-run');
+  fs.writeFileSync(f, ok);
+  await win.locator('.panel-right').getByRole('button', { name: 'Run script' }).click();
+  await win.waitForTimeout(300);
+  await waitIdle();
+  await win.waitForTimeout(500);
+  if (await win.locator('.blk-gen.failed').count()) throw new Error('block still failed after fixing the script');
+  await win.getByRole('button', { name: 'Close panel' }).click();
+});
+await step('model-output-file', async () => {
+  // the table without a script follows its file
+  const f = path.join(projDir(), 'data', 'holdout_metrics.csv');
+  fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('1.037', '9.876'));
+  await win.waitForFunction(() => document.body.innerText.includes('9.876'), null, { timeout: 10000 });
+  if (!fs.readFileSync(path.join(projDir(), 'generated', 'tab_holdout.tex'), 'utf8').includes('9.876')) throw new Error('generated file did not follow the data file');
 });
 await step('split', async () => {
   await win.getByRole('button', { name: 'Split' }).click();
@@ -62,6 +127,9 @@ await step('compile', async () => {
   await win.keyboard.press('Control+Enter');
   await win.waitForFunction(() => !document.body.innerText.includes('Compiling ·'), null, { timeout: 180000 });
   await win.waitForTimeout(1000);
+  const log = fs.readFileSync(path.join(projDir(), '.texwriter', 'build', 'report.log'), 'utf8');
+  const errs = log.split('\n').filter((l) => l.startsWith('!'));
+  if (errs.length) throw new Error(`LaTeX errors: ${errs.slice(0, 3).join(' | ')}`);
   await win.getByRole('button', { name: /Compiled|Compile failed|Not compiled/ }).first().click();
   await win.locator('.pdf-page canvas').first().waitFor({ timeout: 20000 }).catch(() => {});
   await win.waitForTimeout(2500);
@@ -70,6 +138,7 @@ await step('compile', async () => {
 await step('setup', async () => {
   await win.getByRole('button', { name: /Back to editor/ }).click();
   await win.getByRole('button', { name: 'Document setup' }).click();
+  await win.getByRole('heading', { name: 'Generated content' }).waitFor();
   await shot('07-setup');
 });
 await step('source', async () => {
@@ -78,19 +147,16 @@ await step('source', async () => {
   await shot('08-source');
 });
 await step('round-trip-edits', async () => {
-  const root = await win.evaluate(() => window.quire && document.querySelector('.crumbs') ? null : null);
-  void root;
   await win.getByRole('button', { name: 'Visual' }).click();
   const p = win.locator('.ProseMirror p').first();
   await p.click();
   await win.keyboard.press('End');
   await win.keyboard.type(' Visual edit marker 123.');
   await win.waitForTimeout(2500);
-  const qdir = [path.join(home, 'Documents', 'Quire'), path.join(home, 'Quire')].find((d) => fs.existsSync(d));
-  const projDir = path.join(qdir, fs.readdirSync(qdir)[0]);
+  const projDir = projDirOf();
   const tex = fs.readFileSync(path.join(projDir, 'report.tex'), 'utf8');
   if (!tex.includes('Visual edit marker 123.')) throw new Error('visual edit not saved to report.tex');
-  if (!tex.includes('\\begin{equation}\\label{eq:hosmer-lemeshow}')) throw new Error('equation lost');
+  if (!tex.includes('\\begin{equation}\\label{eq:model}')) throw new Error('equation lost');
   await win.getByRole('button', { name: 'LaTeX' }).click();
   await win.locator('.cm-content').click();
   await win.keyboard.press('Control+End');
@@ -98,18 +164,8 @@ await step('round-trip-edits', async () => {
   await win.waitForTimeout(2000);
   const tex2 = fs.readFileSync(path.join(projDir, 'report.tex'), 'utf8');
   if (!tex2.includes('% source edit marker')) throw new Error('source edit not saved');
-  // second run makes generated blocks stale until refreshed
   await win.getByRole('button', { name: 'Visual' }).click();
-  await win.getByRole('button', { name: /^Run tests/ }).click();
-  await win.waitForFunction(() => !document.body.innerText.includes('Running '), null, { timeout: 120000 });
-  await win.waitForTimeout(1500);
-  const stale = await win.locator('.blk-gen.stale').count();
-  console.log('stale blocks after run 2:', stale);
-  if (stale < 1) throw new Error('expected stale blocks');
-  await win.locator('.blk-gen.stale').first().scrollIntoViewIfNeeded();
-  await shot('10-stale');
 });
-const projDirOf = () => { const qdir = [path.join(home, 'Documents', 'Quire'), path.join(home, 'Quire')].find((d) => fs.existsSync(d)); return path.join(qdir, fs.readdirSync(qdir)[0]); };
 const texNow = () => fs.readFileSync(path.join(projDirOf(), 'report.tex'), 'utf8');
 const selectWord = async (loc) => { await loc.dblclick(); await win.waitForTimeout(150); };
 
@@ -145,19 +201,19 @@ await step('underline-colour', async () => {
   await win.keyboard.press('Control+u');
   await win.waitForTimeout(200);
   console.log('u after ctrl+u', await win.locator('.ProseMirror u').count());
-  await win.evaluate(() => { const w = window; w.__log = []; let last = w.__quireState().files['report.tex']?.version; w.__iv = setInterval(() => { const f = w.__quireState().files['report.tex']; if (f.version !== last) { w.__log.push(f.origin + ':' + f.version + ':' + document.querySelectorAll('.ProseMirror u').length); last = f.version; } }, 10); });
+  await win.evaluate(() => { const w = window; w.__log = []; let last = w.__texwriterState().files['report.tex']?.version; w.__iv = setInterval(() => { const f = w.__texwriterState().files['report.tex']; if (f.version !== last) { w.__log.push(f.origin + ':' + f.version + ':' + document.querySelectorAll('.ProseMirror u').length); last = f.version; } }, 10); });
   await win.keyboard.press('Control+Shift+h');
   await win.waitForTimeout(1500);
   console.log('version log', await win.evaluate(() => { clearInterval(window.__iv); return window.__log.join(' '); }));
   if (!(await win.locator('.ProseMirror u').count())) throw new Error('no <u> after Ctrl+U');
   const t = texNow();
   if (!/\\underline\{/.test(t)) throw new Error('\\underline not written');
-  if (!/\\quirehl\{FFF176\}/.test(t)) throw new Error('\\quirehl not written');
+  if (!/\\texwriterhl\{FFF176\}/.test(t)) throw new Error('\\texwriterhl not written');
 });
 await step('find-replace', async () => {
   await win.locator('.ProseMirror > p').first().click();
   await win.keyboard.press('Control+h');
-  await win.getByRole('searchbox').or(win.getByLabel('Find', { exact: true })).first().fill('calibration');
+  await win.getByRole('searchbox').or(win.getByLabel('Find', { exact: true })).first().fill('holdout');
   await win.waitForTimeout(300);
   const status = await win.locator('.findbar [aria-live]').innerText();
   if (!/of \d+/.test(status)) throw new Error(`find status: ${status}`);
@@ -165,16 +221,16 @@ await step('find-replace', async () => {
   const hl = await win.locator('.find-match').count();
   if (hl < 1) throw new Error('no find highlights');
   await shot('13-find');
-  await win.getByLabel('Replace with').fill('calibrationX');
+  await win.getByLabel('Replace with').fill('holdoutX');
   await win.getByRole('button', { name: 'Replace all' }).click();
   await win.waitForTimeout(1500);
-  const cnt = (texNow().match(/calibrationX/g) ?? []).length;
+  const cnt = (texNow().match(/holdoutX/g) ?? []).length;
   console.log('find matches', n, 'replaced', cnt);
   if (cnt !== n) throw new Error(`replace all: ${n} matches but ${cnt} replaced`);
   await win.getByRole('button', { name: 'Close find (Esc)' }).click();
   await win.keyboard.press('Control+z');
   await win.waitForTimeout(1500);
-  if (texNow().includes('calibrationX')) throw new Error('undo of replace all failed');
+  if (texNow().includes('holdoutX')) throw new Error('undo of replace all failed');
 });
 await step('table', async () => {
   const last = win.locator('.ProseMirror > p').nth(3);
@@ -261,11 +317,11 @@ await step('comments', async () => {
   await win.keyboard.press('Control+Enter');
   await win.waitForTimeout(1200);
   if (!(await win.locator('.ProseMirror .cmt').count())) throw new Error('no comment highlight');
-  const f = path.join(projDirOf(), 'quire-comments.json');
+  const f = path.join(projDirOf(), 'texwriter-comments.json');
   if (!fs.existsSync(f) || !fs.readFileSync(f, 'utf8').includes('Please cite')) throw new Error('comment not saved');
   await win.locator('.thread').first().click();
   await win.getByRole('button', { name: 'Reply…' }).click();
-  await win.getByPlaceholder('Reply…').fill('Added Tasche (2013).');
+  await win.getByPlaceholder('Reply…').fill('Added a reference.');
   await win.keyboard.press('Control+Enter');
   await win.waitForTimeout(500);
   await shot('15-comments');
@@ -382,12 +438,12 @@ await step('system-shortcuts', async () => {
   // the Windows key belongs to the OS: Win+S (search), Win+Shift+S (snipping), Win+1…
   const prevented = (init) => win.evaluate((i) => { const ev = new KeyboardEvent('keydown', { ...i, bubbles: true, cancelable: true }); window.dispatchEvent(ev); return ev.defaultPrevented; }, init);
   for (const k of [{ key: 's', metaKey: true }, { key: 'S', metaKey: true, shiftKey: true }, { key: '1', metaKey: true }, { key: 'F1', metaKey: true }]) {
-    if (await prevented(k)) throw new Error(`Quire intercepted ${JSON.stringify(k)}`);
+    if (await prevented(k)) throw new Error(`TeXWriter intercepted ${JSON.stringify(k)}`);
   }
   if (!(await prevented({ key: 's', ctrlKey: true }))) throw new Error('Ctrl+S not handled');
 });
 await step('home-again', async () => {
-  await win.getByRole('button', { name: 'Quire home' }).click();
+  await win.getByRole('button', { name: 'TeXWriter home' }).click();
   await shot('09-home');
 });
 fs.writeFileSync(path.join(out, 'console-errors.txt'), errors.join('\n'));

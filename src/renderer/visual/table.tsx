@@ -133,7 +133,7 @@ function rewriteCell(tr: Transaction, pos: number, attrs: Record<string, unknown
  * When the cursor leaves a number-formatted cell, show what was typed in the cell's format
  * (Excel's behaviour on Enter): "1234.5" becomes "$1,234.50". Text stays as typed.
  */
-const numberCellKey = new PluginKey('quireNumberCells');
+const numberCellKey = new PluginKey('texwriterNumberCells');
 const numberCellPlugin = new Plugin({
   key: numberCellKey,
   appendTransaction(trs, oldState, newState) {

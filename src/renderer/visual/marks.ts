@@ -1,10 +1,10 @@
-// Text colour and highlight marks, serialized as \textcolor and \quirehl.
+// Text colour and highlight marks, serialized as \textcolor and \texwriterhl.
 import { Mark, mergeAttributes } from '@tiptap/core';
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
     textColor: { setTextColor: (color: string) => ReturnType; unsetTextColor: () => ReturnType };
-    quireHighlight: { setHighlightColor: (color: string) => ReturnType; unsetHighlightColor: () => ReturnType };
+    texwriterHighlight: { setHighlightColor: (color: string) => ReturnType; unsetHighlightColor: () => ReturnType };
   }
 }
 
@@ -27,7 +27,7 @@ export const TextColor = Mark.create({
   },
 });
 
-export const QuireHighlight = Mark.create({
+export const TeXWriterHighlight = Mark.create({
   name: 'highlight',
   addAttributes() { return { color: { default: 'FFF176' } }; },
   parseHTML() {

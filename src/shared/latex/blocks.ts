@@ -23,8 +23,9 @@ export interface ParsedDocument {
   bodyOffset: number;
 }
 
-const GEN_START = /^%\s*quire:generated\b(.*)$/;
-const GEN_END = /^%\s*quire:end\b/;
+// `quire:` markers come from projects made before the app was renamed TeXWriter
+const GEN_START = /^%\s*(?:texwriter|quire):generated\b(.*)$/;
+const GEN_END = /^%\s*(?:texwriter|quire):end\b/;
 
 export function splitDocument(tex: string): { prefix: string; body: string; suffix: string; hasDocument: boolean } {
   const b = tex.search(/\\begin\{document\}/);
@@ -197,14 +198,14 @@ function parseMath(src: string, env: string): JNode {
   return { type: 'mathBlock', attrs: { env, latex, label } };
 }
 
-function parseCallout(src: string): JNode | null {
-  const open = '\\begin{quirecallout}';
+function parseCallout(src: string, env: string): JNode | null {
+  const open = `\\begin{${env}}`;
   const a = readArgs(src, open.length, 0);
   if (a.arg === null) return null;
-  const inner = src.slice(a.end, src.length - '\\end{quirecallout}'.length);
+  const inner = src.slice(a.end, src.length - `\\end{${env}}`.length);
   const flow = parseFlow(inner);
   if (!flow || !flow.length || flow.some((n) => n.type !== 'paragraph')) return null;
-  return { type: 'calloutBlock', attrs: { title: a.arg }, content: flow };
+  return { type: 'calloutBlock', attrs: { title: a.arg, env }, content: flow };
 }
 
 function parseCode(src: string, env: string): JNode {
@@ -253,7 +254,7 @@ export function parseBody(body: string): { leading: string; blocks: ParsedBlock[
     if (t.startsWith('%')) {
       const gm = GEN_START.exec(t.trimEnd());
       if (gm) {
-        const endRe = /^[ \t]*%\s*quire:end\b.*$/m;
+        const endRe = /^[ \t]*%\s*(?:texwriter|quire):end\b.*$/m;
         endRe.lastIndex = 0;
         const restStart = lineEndIdx + 1;
         const tail = body.slice(restStart);
@@ -301,7 +302,7 @@ export function parseBody(body: string): { leading: string; blocks: ParsedBlock[
       if (MATH_ENVS.has(env)) node = parseMath(src, env);
       else if (env === 'itemize' || env === 'enumerate') node = parseList(src, env);
       else if (env === 'figure' || env === 'figure*') node = parseFigure(src, env);
-      else if (env === 'quirecallout') node = parseCallout(src);
+      else if (env === 'texwritercallout' || env === 'quirecallout') node = parseCallout(src, env);
       else if (env === 'lstlisting' || env === 'verbatim') node = parseCode(src, env);
       else if (env === 'table' || env === 'table*' || env === 'tabular') node = parseTableBlock(src);
       if (!node) node = raw(src);
@@ -446,7 +447,7 @@ export function canonicalBlock(node: JNode, pad = ''): string {
       return `\\begin{${env}}${label}\n${indent(a.latex ?? '', '  ')}\n\\end{${env}}`;
     }
     case 'generatedBlock':
-      return `% quire:generated id=${a.id}\n${a.inner || `\\input{generated/${a.id}.tex}`}\n% quire:end`;
+      return `% texwriter:generated id=${a.id}\n${a.inner || `\\input{generated/${a.id}.tex}`}\n% texwriter:end`;
     case 'figureBlock': {
       const env = a.env || 'figure';
       const lines = [`\\begin{${env}}${a.placement ? `[${a.placement}]` : ''}`, '  \\centering'];
@@ -457,7 +458,8 @@ export function canonicalBlock(node: JNode, pad = ''): string {
       return lines.join('\n');
     }
     case 'calloutBlock':
-      return `\\begin{quirecallout}{${a.title ?? ''}}\n${serializeFlow(node.content, '')}\n\\end{quirecallout}`;
+      // older projects define the environment as quirecallout; keep whichever the source used
+      return `\\begin{${a.env || 'texwritercallout'}}{${a.title ?? ''}}\n${serializeFlow(node.content, '')}\n\\end{${a.env || 'texwritercallout'}}`;
     case 'codeBlock': {
       const env = a.env || 'lstlisting';
       const code = (node.content ?? []).map((c) => c.text ?? '').join('');

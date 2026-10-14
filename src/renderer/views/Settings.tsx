@@ -61,8 +61,8 @@ export function SettingsScreen() {
           <section className="sgrp" id="set-general">
             <h2>General</h2>
             <TextSetting label="Your name (shown on comments you write)" value={settings.userName} placeholder="e.g. Sid Iyer" onSave={(v) => void updateSettings({ userName: v })} />
-            <div className="small muted">Comments are stored in quire-comments.json in the project folder. Anyone you share the folder with (OneDrive, a network drive, Git) sees them, with your name on them.</div>
-            <TextSetting label="Projects folder (new and sample projects; default for exports)" mono browse="dir" value={settings.projectsDir} placeholder="Leave empty for Documents\Quire" onSave={(v) => void updateSettings({ projectsDir: v })} />
+            <div className="small muted">Comments are stored in texwriter-comments.json in the project folder. Anyone you share the folder with (OneDrive, a network drive, Git) sees them, with your name on them.</div>
+            <TextSetting label="Projects folder (new and sample projects; default for exports)" mono browse="dir" value={settings.projectsDir} placeholder="Leave empty for Documents\TeXWriter" onSave={(v) => void updateSettings({ projectsDir: v })} />
             <label className="f">Interface size
               <select className="field" style={{ width: 160 }} value={settings.uiZoom} onChange={(e) => void updateSettings({ uiZoom: Number(e.target.value) })}>
                 {[0.8, 0.9, 1, 1.1, 1.25, 1.5].map((z) => <option key={z} value={z}>{Math.round(z * 100)}%</option>)}
@@ -80,20 +80,20 @@ export function SettingsScreen() {
           </section>
           <section className="sgrp" id="set-tools">
             <div className="row"><h2 className="grow">LaTeX and Python</h2><button className="btn btn-sm" disabled={busy} onClick={() => void redetect()}><Refresh />{busy ? 'Detecting…' : 'Detect again'}</button></div>
-            <div className="small muted">Quire searches PATH (including changes made by installers since Quire started), the MiKTeX and TeX Live install locations and the registry. It re-checks automatically when you switch back to Quire after installing something.</div>
+            <div className="small muted">TeXWriter searches PATH (including changes made by installers since TeXWriter started), the MiKTeX and TeX Live install locations and the registry. It re-checks automatically when you switch back to TeXWriter after installing something.</div>
             {tc && (
               <div className="toolbox">
                 <Tool name="Distribution" path={tc.distribution ? `${tc.distribution}${tc.texBin ? ` · ${tc.texBin}` : ''}` : null} need hint="No TeX distribution found — install MiKTeX (miktex.org) or TeX Live" />
                 <Tool name="pdflatex" path={tc.engines.pdflatex} need />
                 <Tool name="xelatex" path={tc.engines.xelatex} hint="Optional — needed only for the XeLaTeX engine" />
                 <Tool name="lualatex" path={tc.engines.lualatex} hint="Optional" />
-                <Tool name="latexmk" path={tc.latexmk} hint="Optional — Quire runs the passes itself without it" />
-                {tc.distribution === 'MiKTeX' && <Tool name="Perl" path={tc.perl} hint="Not found — latexmk needs Perl on MiKTeX; Quire runs pdflatex/bibtex directly instead" />}
+                <Tool name="latexmk" path={tc.latexmk} hint="Optional — TeXWriter runs the passes itself without it" />
+                {tc.distribution === 'MiKTeX' && <Tool name="Perl" path={tc.perl} hint="Not found — latexmk needs Perl on MiKTeX; TeXWriter runs pdflatex/bibtex directly instead" />}
                 <Tool name="BibTeX" path={tc.bibtex} hint="Optional — needed for bibliographies" />
                 <Tool name="biber" path={tc.biber} hint="Optional — needed only for biblatex" />
                 <Tool name="SyncTeX" path={tc.synctex} hint="Optional — PDF ↔ source jumps fall back to built-in SyncTeX parsing" />
-                <Tool name="Python" path={tc.python} hint="Needed to run test suites" />
-                <Tool name="Git" path={tc.git} hint="Optional — records the commit of each test run" />
+                <Tool name="Python" path={tc.python} hint="Runs Python scripts behind generated tables and figures" />
+                <Tool name="Git" path={tc.git} hint="Optional" />
               </div>
             )}
             <TextSetting label="TeX programs folder (leave empty to auto-detect)" mono browse="dir" value={settings.texBinDir} placeholder="e.g. C:\Users\you\AppData\Local\Programs\MiKTeX\miktex\bin\x64" onSave={(v) => void updateSettings({ texBinDir: v })} />
@@ -106,7 +106,7 @@ export function SettingsScreen() {
           </section>
           <section className="sgrp" id="set-about" style={{ borderBottom: 0 }}>
             <h2>About</h2>
-            {info && <dl className="kv"><dt>Quire</dt><dd>{info.version}</dd><dt>Electron</dt><dd>{info.electron}</dd><dt>Chromium</dt><dd>{info.chrome}</dd><dt>Node</dt><dd>{info.node}</dd><dt>Settings</dt><dd className="mono small">{info.userData}</dd></dl>}
+            {info && <dl className="kv"><dt>TeXWriter</dt><dd>{info.version}</dd><dt>Electron</dt><dd>{info.electron}</dd><dt>Chromium</dt><dd>{info.chrome}</dd><dt>Node</dt><dd>{info.node}</dd><dt>Settings</dt><dd className="mono small">{info.userData}</dd></dl>}
           </section>
         </main>
       </div>

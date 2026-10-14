@@ -4,6 +4,7 @@ import type { Engine, ProjectManifest, ThemeSettings } from '../../shared/types'
 import { FONT_LABELS, PRESETS, themeBlock } from '../../shared/latex/theme';
 import { api, applyTheme, compileNow, guard, promptText, saveManifest, setState, toast, useStore, gotoSource } from '../store';
 import type { UserTemplate } from '../../shared/types';
+import { academicFormatInfo } from '../../shared/templateCatalog';
 import { TitleBar } from '../components/Chrome';
 
 const PREVIEW_FONT: Record<ThemeSettings['bodyFont'], string> = {
@@ -52,6 +53,7 @@ function MiniPage({ t, side, name }: { t: ThemeSettings; side: 'verso' | 'recto'
 export function SetupScreen() {
   const project = useStore((s) => s.project)!;
   const [t, setT] = useState<ThemeSettings>(project.manifest.theme);
+  const tc = useStore((s) => s.toolchain);
   const [m, setM] = useState<ProjectManifest>(project.manifest);
   useEffect(() => { setT(project.manifest.theme); setM(project.manifest); }, [project.root]);
   const [styles, setStyles] = useState<UserTemplate[]>([]);
@@ -70,7 +72,7 @@ export function SetupScreen() {
     for (const k of Object.keys(t) as (keyof ThemeSettings)[]) if (JSON.stringify(t[k]) !== JSON.stringify(base[k])) out.push(k);
     return out;
   }, [t, base]);
-  const projChanged = m.engine !== project.manifest.engine || m.tests.command !== project.manifest.tests.command || m.tests.python !== project.manifest.tests.python || m.refreshBeforeCompile !== project.manifest.refreshBeforeCompile || m.name !== project.manifest.name || m.tests.suiteName !== project.manifest.tests.suiteName;
+  const projChanged = m.engine !== project.manifest.engine || m.name !== project.manifest.name || JSON.stringify(m.generators) !== JSON.stringify(project.manifest.generators);
   const up = (p: Partial<ThemeSettings>) => setT((x) => ({ ...x, ...p, preset: p.preset ?? 'custom' }));
   const upM = (p: Partial<ThemeSettings['margins']>) => setT((x) => ({ ...x, margins: { ...x.margins, ...p }, preset: 'custom' }));
   const apply = async () => {
@@ -90,11 +92,17 @@ export function SetupScreen() {
       </>} />
       <div className="body">
         <nav aria-label="Setup sections" style={{ width: 212, padding: '16px 10px', display: 'flex', flexDirection: 'column', gap: 2, background: 'var(--panel)', borderRight: '1px solid var(--rule)' }}>
-          {[['theme', 'Theme'], ['page', 'Page layout'], ['type', 'Typography'], ['color', 'Colour'], ['header', 'Headers and footers'], ['compiler', 'Compiler and tests'], ['pre', 'Generated preamble']].map(([id, l]) => (
+          {(t.classLayout ? [['theme', 'Layout'], ['compiler', 'Compiler'], ['generated', 'Generated content'], ['pre', 'Managed preamble']] : [['theme', 'Theme'], ['page', 'Page layout'], ['type', 'Typography'], ['color', 'Colour'], ['header', 'Headers and footers'], ['compiler', 'Compiler'], ['generated', 'Generated content'], ['pre', 'Generated preamble']]).map(([id, l]) => (
             <button key={id} className="nav" onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })}>{l}</button>
           ))}
         </nav>
         <main className="setup-main">
+          {t.classLayout ? (
+            <section className="sgrp" id="theme">
+              <h2>Layout</h2>
+              <div className="small">This paper uses the <b>{academicFormatInfo(project.manifest.academicFormat).cls}</b> class ({academicFormatInfo(project.manifest.academicFormat).title}). The publisher's class sets the page size, margins, fonts, columns and headings, so they are not changed here: submissions must keep the class's layout. Class options (e.g. <span className="mono">[conference]</span>, <span className="mono">[review]</span>) can be edited on the first line of {project.manifest.mainFile}.</div>
+            </section>
+          ) : <>
           <section className="sgrp" id="theme">
             <div className="row" style={{ justifyContent: 'space-between' }}><div><h2>Theme</h2><div className="small muted">A starting point for the settings below.</div></div><button className="btn btn-sm" onClick={() => void saveStyle()}>Save as style…</button></div>
             <div role="group" aria-label="Theme preset" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
@@ -166,22 +174,25 @@ export function SetupScreen() {
             </div>
             <div className="small muted">Page numbers print centred in the footer.</div>
           </section>
+          </>}
           <section className="sgrp" id="compiler">
-            <h2>Compiler and tests</h2>
+            <h2>Compiler</h2>
             <label className="f">Project name<input className="field" value={m.name} onChange={(e) => setM({ ...m, name: e.target.value })} /></label>
             <label className="f">LaTeX engine<select className="field" value={m.engine} onChange={(e) => setM({ ...m, engine: e.target.value as Engine })}><option value="pdflatex">pdfLaTeX</option><option value="lualatex">LuaLaTeX</option><option value="xelatex">XeLaTeX</option></select></label>
-            <label className="f">Test command <span className="small muted">— {'{python}'} and {'{runDir}'} are filled in; the command must write results.json or junit.xml into {'{runDir}'}</span>
-              <input className="field mono" value={m.tests.command} placeholder={'{python} validation/run_suite.py --out "{runDir}"'} onChange={(e) => setM({ ...m, tests: { ...m.tests, command: e.target.value } })} /></label>
-            <div className="row" style={{ gap: 12 }}>
-              <label className="f grow">Suite name<input className="field" value={m.tests.suiteName ?? ''} onChange={(e) => setM({ ...m, tests: { ...m.tests, suiteName: e.target.value } })} /></label>
-              <label className="f grow">Python interpreter (optional)<input className="field mono" value={m.tests.python ?? ''} placeholder="auto-detected" onChange={(e) => setM({ ...m, tests: { ...m.tests, python: e.target.value || undefined } })} /></label>
-            </div>
-            <label className="chk"><input type="checkbox" checked={m.refreshBeforeCompile} onChange={(e) => setM({ ...m, refreshBeforeCompile: e.target.checked })} />Refresh generated content from the latest run before each compile</label>
+          </section>
+          <section className="sgrp" id="generated">
+            <div><h2>Generated content</h2><div className="small muted">Tables and figures built by scripts in the project (Insert → Generated table / Generated figure).</div></div>
+            <label className="f">Python interpreter <span className="small muted">— for .py scripts; empty uses the one TeXWriter found ({tc?.python ?? 'none found'})</span>
+              <input className="field mono" value={m.generators.python ?? ''} placeholder="auto-detected" onChange={(e) => setM({ ...m, generators: { ...m.generators, python: e.target.value || undefined } })} /></label>
+            <label className="f" style={{ maxWidth: 260 }}>Stop a script after (seconds)
+              <input className="field" type="number" min={5} max={86400} value={m.generators.timeoutSec} onChange={(e) => setM({ ...m, generators: { ...m.generators, timeoutSec: Math.max(5, Number(e.target.value) || 300) } })} /></label>
+            <label className="chk"><input type="checkbox" checked={m.generators.runBeforeCompile} onChange={(e) => setM({ ...m, generators: { ...m.generators, runBeforeCompile: e.target.checked } })} />Run every script before each compile (otherwise compiling only re-reads their outputs)</label>
+            <div className="small muted">Other languages run with their usual command (Rscript, julia, node, bash…); set a block's own command in its properties if needed.</div>
           </section>
           <section className="sgrp" id="pre" style={{ borderBottom: 0 }}>
             <div className="row" style={{ justifyContent: 'space-between' }}><h2>Generated preamble</h2><button className="btn btn-q btn-sm" onClick={() => gotoSource('preamble.tex', 1)}>Open preamble.tex</button></div>
             <pre className="logbox" style={{ maxHeight: 'none', margin: 0 }}>{themeBlock(t)}</pre>
-            <div className="small muted">Only the lines between the quire:theme markers in preamble.tex, and the font-size and paper options of \documentclass, are rewritten. Everything else in the preamble stays exactly as written.</div>
+            <div className="small muted">Only the lines between the texwriter:theme markers in preamble.tex, and the font-size and paper options of \documentclass, are rewritten. Everything else in the preamble stays exactly as written.</div>
           </section>
         </main>
         <aside className="preview-pane" aria-label="Live preview">

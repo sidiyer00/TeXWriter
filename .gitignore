@@ -8,3 +8,4 @@ e2e-shots/
 # local notes, not part of the repository
 CLAUDE.md
 HANDOFF.md
+__pycache__/

@@ -1,6 +1,6 @@
-// Preload bridge: exposes a typed, minimal API as window.quire.
+// Preload bridge: exposes a typed, minimal API as window.texwriter.
 import { contextBridge, ipcRenderer } from 'electron';
-import type { QuireApi } from '../shared/types';
+import type { TeXWriterApi } from '../shared/types';
 
 async function call<T>(channel: string, ...args: unknown[]): Promise<T> {
   const r = (await ipcRenderer.invoke(channel, ...args)) as { ok: boolean; value?: T; error?: string };
@@ -14,7 +14,7 @@ function on<T>(channel: string, cb: (e: T) => void): () => void {
   return () => ipcRenderer.removeListener(channel, fn);
 }
 
-const api: QuireApi = {
+const api: TeXWriterApi = {
   platform: process.platform,
   toolchain: () => call('toolchain'),
   recents: () => call('recents'),
@@ -31,7 +31,7 @@ const api: QuireApi = {
   writeText: (root, rel, text) => call('writeText', root, rel, text),
   readBinary: (root, rel) => call('readBinary', root, rel),
   importAsset: (root, abs, dest) => call('importAsset', root, abs, dest),
-  fileUrl: (root, rel) => `quire-file://local/?root=${encodeURIComponent(root)}&path=${encodeURIComponent(rel)}`,
+  fileUrl: (root, rel) => `texwriter-file://local/?root=${encodeURIComponent(root)}&path=${encodeURIComponent(rel)}`,
   watchProject: (root) => call('watchProject', root),
   onFileChanged: (cb) => on('file-changed', cb),
   compile: (root) => call('compile', root),
@@ -39,11 +39,10 @@ const api: QuireApi = {
   onCompileEvent: (cb) => on('compile-event', cb),
   synctexEdit: (root, page, x, y) => call('synctexEdit', root, page, x, y),
   synctexView: (root, file, line) => call('synctexView', root, file, line),
-  runTests: (root) => call('runTests', root),
-  cancelRun: () => call('cancelRun'),
-  onRunEvent: (cb) => on('run-event', cb),
-  loadRun: (root, n) => call('loadRun', root, n),
-  listRuns: (root) => call('listRuns', root),
+  runGenerator: (root, id) => call('runGenerator', root, id),
+  cancelGenerator: () => call('cancelGenerator'),
+  onGeneratorEvent: (cb) => on('generator-event', cb),
+  statFile: (root, rel) => call('statFile', root, rel),
   exportPdf: (root) => call('exportPdf', root),
   exportBundle: (root) => call('exportBundle', root),
   exportProvenance: (root) => call('exportProvenance', root),
@@ -68,4 +67,4 @@ const api: QuireApi = {
   onFlush: (cb) => on('flush', async () => { try { await cb(); } finally { ipcRenderer.send('flushed'); } }),
 };
 
-contextBridge.exposeInMainWorld('quire', api);
+contextBridge.exposeInMainWorld('texwriter', api);

@@ -1,115 +1,85 @@
 \documentclass[11pt,oneside,letterpaper]{article}
 \input{preamble.tex}
 
-\title{CORP-PD v4.2 \\ \large Annual Validation Report 2026}
-\author{Model Validation \\ \small Large Corporate PD model MRM-0417}
+\title{Example: generated tables and figures}
+\author{TeXWriter}
 \date{\today}
 
 \begin{document}
 
 \maketitle
 
-\tableofcontents
+\section{How this example works}\label{sec:how}
+This document is written in TeXWriter, but its tables and its figure are not typed by hand.
+Each one is a \emph{generated} block: TeXWriter runs a script, reads the file the script
+writes, and turns it into LaTeX. Press \textbf{Run all} in the toolbar (or Run on a single
+block) to produce them; until then they show a placeholder.
 
-\clearpage
+\begin{itemize}
+  \item \autoref{tab:coefficients} comes from \texttt{scripts/fit\_model.py}, which fits a
+  linear model and writes a CSV file.
+  \item \autoref{fig:fit} comes from \texttt{scripts/plot\_fit.py}, which saves a PDF with
+  matplotlib.
+  \item \autoref{tab:holdout} has no script: it reads \texttt{data/holdout\_metrics.csv},
+  a file another program (here, a scoring job) keeps up to date. Edit the file and the table
+  follows.
+\end{itemize}
 
-\section{Executive summary}\label{sec:summary}
-This report presents the 2026 annual validation of the CORP-PD v4.2 probability of default
-model for large corporate obligors. The model continues to rank-order risk well: the
-full-sample AUC remains well above the acceptance threshold (\autoref{tab:discrimination}).
-Calibration is weaker. Grade~7 under-predicts observed defaults and the portfolio-level
-binomial test rejects at the 1\% level, which leads to Finding F-02 in
-\autoref{sec:findings}.
+Add your own with Insert, Generated table or Generated figure, or from the Generated tab on
+the left. Each block is paired with a script and the file it writes; its properties set the
+caption, label, table style and number format.
 
-\begin{quirecallout}{Validation opinion · Fit for use with conditions}
-The model may remain in use subject to recalibration of the sub-investment-grade tail
-(Finding F-02) and remediation of the EBITDA data gap (Finding F-01) by Q2 2027.
-\end{quirecallout}
-
-\section{Scope and model overview}\label{sec:scope}
-CORP-PD v4.2 assigns one of eight rating grades to large corporate obligors with annual
-revenue above USD 500 million. The grade-level PD is the long-run average default rate
-mapped through the master scale. The model is used for credit approval, pricing and
-regulatory capital, consistent with the IRB requirements in \citep{bcbs_irb_2017}.
-
-The rating score is a logistic function of financial and qualitative factors:
-\begin{equation}\label{eq:logit}
-  \mathrm{PD}_i = \frac{1}{1 + \exp\!\left(-\beta_0 - \sum_{k=1}^{K} \beta_k x_{ik}\right)}
+\section{Model}\label{sec:model}
+The response $y$ is modelled as a linear function of two predictors,
+\begin{equation}\label{eq:model}
+  y_i = \beta_0 + \beta_1 x_{1i} + \beta_2 x_{2i} + \varepsilon_i ,
 \end{equation}
+estimated by ordinary least squares on the training sample \citep{hastie2009}.
 
-\section{Data}\label{sec:data}
-\subsection{Sources and lineage}\label{sec:sources}
-Obligor financials are taken from the spreading system and ratings from the rating
-workflow. The validation sample covers 6,657 obligors rated at the 2025 year end.
+% texwriter:generated id=tab_coefficients
+\input{generated/tab_coefficients.tex}
+% texwriter:end
 
-\subsection{Observation window}\label{sec:obs-window}
-Defaults are observed over the one-year horizon following each rating date between 2019
-and 2025. Defaults use the 90-days-past-due or unlikeliness-to-pay definition.
+\begin{texwritercallout}{Note}
+The coefficients in \autoref{tab:coefficients} are recomputed every time the script runs, so
+the numbers in this document always match the code and the data.
+\end{texwritercallout}
 
-\section{Performance testing}\label{sec:performance}
-All tests are executed by the validation suite in \texttt{validation/run\_suite.py}. Each
-table below is generated from the latest test run and records the run that produced it.
-
-\subsection{Discrimination}\label{sec:discrimination}
-Discrimination is measured with the area under the ROC curve (AUC), the Gini coefficient
-and the Kolmogorov--Smirnov statistic, where $\mathrm{Gini} = 2\,\mathrm{AUC} - 1$.
-
-% quire:generated id=tab_discrimination
-\input{generated/tab_discrimination.tex}
-% quire:end
-
-\subsection{Calibration}\label{sec:calibration}
-Calibration was assessed at the rating-grade level by comparing the long-run average
-predicted PD with observed one-year default rates. Following \citet{tasche2013}, each
-grade was tested with a Jeffreys test at the 5\% level, and the portfolio with the
-Hosmer--Lemeshow statistic:
-\begin{equation}\label{eq:hosmer-lemeshow}
-  \mathrm{HL} = \sum_{g=1}^{G} \frac{(O_g - N_g\bar{p}_g)^2}{N_g\bar{p}_g(1-\bar{p}_g)}
+\section{Performance}\label{sec:performance}
+Accuracy is measured on the holdout sample with the root mean squared error,
+\begin{equation}\label{eq:rmse}
+  \mathrm{RMSE} = \sqrt{\frac{1}{n}\sum_{i=1}^{n} \left(y_i - \hat{y}_i\right)^2} .
 \end{equation}
+Fitted and observed values on the holdout sample line up around the diagonal
+(\autoref{fig:fit}), and the error in \eqref{eq:rmse} is close to the noise level.
 
-% quire:generated id=tab_calib_grade
-\input{generated/tab_calib_grade.tex}
-% quire:end
+% texwriter:generated id=fig_fit
+\input{generated/fig_fit.tex}
+% texwriter:end
 
-% quire:generated id=sum_calibration
-\input{generated/sum_calibration.tex}
-% quire:end
+The scoring job reports error metrics for both samples; the header has two levels because
+the file has two header rows.
 
-% quire:generated id=fig_reliability
-\input{generated/fig_reliability.tex}
-% quire:end
-
-\subsection{Stability}\label{sec:stability}
-Population stability is measured against the development sample with the population
-stability index (PSI) on the score distribution within each sector.
-
-% quire:generated id=tab_psi_sector
-\input{generated/tab_psi_sector.tex}
-% quire:end
-
-\section{Findings and limitations}\label{sec:findings}
-\begin{quirecallout}{Finding F-01 · Severity: Low}
-EBITDA is missing for 3.9\% of obligors, against a 2\% tolerance. Missing values are
-imputed with sector medians, which flatters leverage-driven scores.
-\end{quirecallout}
-
-\begin{quirecallout}{Finding F-02 · Severity: Medium}
-Grade~7 under-predicts observed defaults. Recalibrate the grade 6--8 master-scale
-boundaries before the 2027 annual review and re-run the Jeffreys test on the recalibrated
-scale.
-\end{quirecallout}
-
-\bibliographystyle{plainnat}
-\bibliography{references}
+% texwriter:generated id=tab_holdout
+\input{generated/tab_holdout.tex}
+% texwriter:end
 
 \appendix
 
-\section{Test suite listing}\label{app:code}
-The Jeffreys test used for grade-level calibration:
+\section{Writing a generator script}\label{app:script}
+A script only has to write one file: a CSV (or a LaTeX tabular) for a table, a PDF or PNG for
+a figure. TeXWriter passes the path in the \texttt{TEXWRITER\_OUTPUT} environment variable
+and runs the script with the project folder as the working directory.
+
 \begin{lstlisting}[language=Python]
-def jeffreys_pvalue(defaults, obligors, pd):
-    """One-sided: small p means the PD under-predicts defaults."""
-    return betainc(defaults + 0.5, obligors - defaults + 0.5, pd)
+import csv, os
+
+rows = [["Model", "RMSE"], ["Linear", 1.04], ["Mean only", 2.31]]
+with open(os.environ["TEXWRITER_OUTPUT"], "w", newline="") as f:
+    csv.writer(f).writerows(rows)
 \end{lstlisting}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
 
 \end{document}

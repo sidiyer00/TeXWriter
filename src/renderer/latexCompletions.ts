@@ -59,7 +59,7 @@ const ENVS: [string, string, string][] = [
   ['table', '\\begin{table}[htbp]\n  \\centering\n  \\caption{${caption}}\n  \\label{tab:${label}}\n  \\begin{tabular}{lrr}\n    \\toprule\n    ${A} & ${B} & ${C} \\\\\n    \\midrule\n     &  &  \\\\\n    \\bottomrule\n  \\end{tabular}\n\\end{table}', 'booktabs table'],
   ['tabular', '\\begin{tabular}{${lrr}}\n  ${} \\\\\n\\end{tabular}', 'tabular'],
   ['lstlisting', '\\begin{lstlisting}[language=${Python}]\n${}\n\\end{lstlisting}', 'code listing'],
-  ['quirecallout', '\\begin{quirecallout}{${Finding F-01 · Severity: Medium}}\n${}\n\\end{quirecallout}', 'callout box'],
+  ['texwritercallout', '\\begin{texwritercallout}{${Finding F-01 · Severity: Medium}}\n${}\n\\end{texwritercallout}', 'callout box'],
   ['abstract', '\\begin{abstract}\n${}\n\\end{abstract}', 'abstract'],
   ['center', '\\begin{center}\n${}\n\\end{center}', 'centred block'],
   ['minipage', '\\begin{minipage}{${0.48}\\linewidth}\n${}\n\\end{minipage}', 'minipage'],

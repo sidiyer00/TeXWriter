@@ -27,7 +27,7 @@ export function getSettings(): AppSettings {
 
 /** Where new/sample projects are created and exports default to (Settings → Projects folder). */
 export function projectsDir(): string {
-  return getSettings().projectsDir || path.join(app.getPath('documents'), 'Quire');
+  return getSettings().projectsDir || path.join(app.getPath('documents'), 'TeXWriter');
 }
 
 export function saveSettings(patch: Partial<AppSettings>): AppSettings {

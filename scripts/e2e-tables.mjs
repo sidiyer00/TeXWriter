@@ -10,11 +10,11 @@ import electronPath from 'electron';
 
 const out = path.resolve('e2e-shots');
 fs.mkdirSync(out, { recursive: true });
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'quire-e2e-tables-'));
+const home = fs.mkdtempSync(path.join(os.tmpdir(), 'texwriter-e2e-tables-'));
 const app = await electron.launch({
   executablePath: electronPath,
   args: ['.', '--no-sandbox', `--user-data-dir=${path.join(home, 'userdata')}`],
-  env: { ...process.env, HOME: home, XDG_DOCUMENTS_DIR: path.join(home, 'Documents'), QUIRE_SAMPLE_PACE: '0.01' },
+  env: { ...process.env, HOME: home, XDG_DOCUMENTS_DIR: path.join(home, 'Documents'), TEXWRITER_SAMPLE_PACE: '0.01' },
 });
 await app.evaluate(({ app }, d) => app.setPath('documents', d), path.join(home, 'Documents'));
 const win = await app.firstWindow();
@@ -25,7 +25,7 @@ await win.setViewportSize({ width: 1440, height: 900 });
 const shot = async (name) => { await win.waitForTimeout(400); await win.screenshot({ path: path.join(out, `${name}.png`) }); console.log('shot', name); };
 const step = async (name, fn) => { try { await fn(); console.log('ok', name); } catch (e) { console.error(`STEP FAILED: ${name}:`, e.message); await shot(`fail-${name}`); await app.close(); process.exit(1); } };
 const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
-const projects = () => path.join(home, 'Documents', 'Quire');
+const projects = () => path.join(home, 'Documents', 'TeXWriter');
 let proj = '';
 const tex = (rel = 'report.tex') => fs.readFileSync(path.join(proj, rel), 'utf8');
 const menu = async (top, item) => {
@@ -36,10 +36,10 @@ const compile = async () => {
   await win.keyboard.press('Control+Enter');
   await win.waitForFunction(() => !document.body.innerText.includes('Compiling ·'), null, { timeout: 180000 });
   await win.waitForTimeout(800);
-  const log = fs.readFileSync(path.join(proj, '.quire', 'build', `${path.basename(JSON.parse(tex('quire.json')).mainFile, '.tex')}.log`), 'utf8');
+  const log = fs.readFileSync(path.join(proj, '.texwriter', 'build', `${path.basename(JSON.parse(tex('texwriter.json')).mainFile, '.tex')}.log`), 'utf8');
   const errs = log.split('\n').filter((l) => l.startsWith('!'));
   expect(!errs.length, `LaTeX errors: ${errs.slice(0, 3).join(' | ')}`);
-  expect(fs.existsSync(path.join(proj, '.quire', 'build', `${path.basename(JSON.parse(tex('quire.json')).mainFile, '.tex')}.pdf`)), 'no PDF');
+  expect(fs.existsSync(path.join(proj, '.texwriter', 'build', `${path.basename(JSON.parse(tex('texwriter.json')).mainFile, '.tex')}.pdf`)), 'no PDF');
 };
 
 // Excel 365's clipboard for B2:E5 with "Observed" merged over two columns and "Result" over two rows
@@ -155,34 +155,40 @@ await step('real-clipboard', async () => {
 
 await step('header-level', async () => {
   await win.locator('.tblock td', { hasText: /^3$/ }).last().click();
-  const direct = win.getByRole('button', { name: /Add a header row above the table/ });
+  const tbar = win.getByRole('toolbar', { name: 'Table' });
+  await tbar.waitFor();
+  const direct = tbar.getByRole('button', { name: /Add a header row above the table/ });
   if (await direct.isVisible()) await direct.click();
-  else { await win.getByRole('button', { name: /^More/ }).last().click(); await win.locator('.menu .mitem', { hasText: 'Add header level' }).click(); }
+  else { await tbar.getByRole('button', { name: /^More/ }).click(); await win.locator('.menu .mitem', { hasText: 'Add header level' }).click(); }
   await win.waitForTimeout(1200);
   const rows = await win.locator('.tblock').last().locator('tr').count();
   expect(rows === 4, `expected 4 rows after adding a header level, got ${rows}`);
 });
 
 await step('linked-csv', async () => {
+  // a data export another program keeps up to date
+  fs.writeFileSync(path.join(proj, 'data', 'grades.csv'), 'grade,obligors,defaults\n1,412,0\n2,688,1\n3,1204,3\n');
+  await win.waitForTimeout(1500); // the file watcher adds it to the project's file list
   await win.locator('.ProseMirror > p').nth(3).click();
   await menu('Insert', 'Table from data file');
-  await win.locator('.dialog select').first().selectOption('data/grades_2025.csv');
-  await win.locator('.dt-preview table').waitFor();
-  await win.locator('.dialog select').nth(2).selectOption('striped');
+  const dlg = win.getByRole('dialog', { name: 'New generated table' });
+  await dlg.getByLabel(/^Label/).fill('tab:grades');
+  await dlg.getByRole('combobox', { name: 'File' }).selectOption('data/grades.csv');
+  await dlg.locator('.dt-preview table').waitFor();
+  await dlg.getByRole('combobox', { name: 'Style' }).selectOption('striped');
   await shot('22-data-table-dialog');
-  await win.getByRole('button', { name: 'Insert table', exact: true }).click();
+  await dlg.getByRole('button', { name: 'Insert table', exact: true }).click();
   await win.waitForTimeout(1500);
   const t = tex();
-  const m = /% quire:generated id=(tab_grades_2025)\n\\input\{generated\/tab_grades_2025\.tex\}\n% quire:end/.exec(t);
-  expect(m, 'linked \\input block missing from report.tex');
-  const g = tex('generated/tab_grades_2025.tex');
+  expect(/% texwriter:generated id=tab_grades\n\\input\{generated\/tab_grades\.tex\}\n% texwriter:end/.test(t), 'linked \\input block missing from report.tex');
+  const g = tex('generated/tab_grades.tex');
   expect(g.includes('\\rowcolors{2}') && g.includes('1204'), 'generated table wrong');
-  const cfg = JSON.parse(tex('quire.json')).blocks.tab_grades_2025;
-  expect(cfg.dataFile === 'data/grades_2025.csv', 'manifest entry missing');
+  const cfg = JSON.parse(tex('texwriter.json')).blocks.tab_grades;
+  expect(cfg.output === 'data/grades.csv' && !cfg.script, 'manifest entry wrong');
   // edit the CSV outside the app: the table follows
-  fs.writeFileSync(path.join(proj, 'data/grades_2025.csv'), fs.readFileSync(path.join(proj, 'data/grades_2025.csv'), 'utf8').replace('1204', '9999'));
+  fs.writeFileSync(path.join(proj, 'data/grades.csv'), fs.readFileSync(path.join(proj, 'data/grades.csv'), 'utf8').replace('1204', '9999'));
   await win.waitForFunction(() => document.body.innerText.includes('9999'), null, { timeout: 10000 });
-  expect(tex('generated/tab_grades_2025.tex').includes('9999'), 'generated file did not follow the CSV');
+  expect(tex('generated/tab_grades.tex').includes('9999'), 'generated file did not follow the CSV');
   await win.locator('.blk-gen', { hasText: '9999' }).scrollIntoViewIfNeeded();
   await shot('23-linked-csv');
 });
@@ -203,14 +209,14 @@ await step('source-paste', async () => {
 
 await step('save-template', async () => {
   await menu('File', 'Save as template');
-  await win.locator('.dialog input').first().fill('Bank validation layout');
+  await win.locator('.dialog input').first().fill('Team model doc layout');
   await shot('24-save-template');
   await win.getByRole('button', { name: 'Save template' }).click();
   await win.waitForTimeout(800);
   const dir = path.join(home, 'userdata', 'templates');
-  const t = JSON.parse(fs.readFileSync(path.join(dir, 'bank-validation-layout.json'), 'utf8'));
+  const t = JSON.parse(fs.readFileSync(path.join(dir, 'team-model-doc-layout.json'), 'utf8'));
   expect(t.layout && t.style && t.files['report.tex'] && t.files['preamble.tex'], 'template incomplete');
-  expect(!t.files['report.tex'].includes('quire:generated') && t.files['report.tex'].includes('[Write this section.]'), 'layout not reduced to structure');
+  expect(!t.files['report.tex'].includes('texwriter:generated') && t.files['report.tex'].includes('[Write this section.]'), 'layout not reduced to structure');
 });
 
 await step('setup-style', async () => {
@@ -233,23 +239,42 @@ const newProject = async (pick, title, close = true) => {
   proj = path.join(projects(), title.replace(/\s+/g, '-'));
 };
 
-for (const [type, title] of [['Journal article', 'Journal Paper'], ['Conference paper', 'Conf Paper'], ['Thesis or dissertation', 'My Thesis'], ['APA 7 paper', 'APA Study'], ['Working paper', 'Working Paper'], ['Research proposal', 'Proposal'], ['Technical report', 'Tech Report']]) {
+for (const [type, title] of [['Model documentation', 'Model Doc'], ['Ongoing monitoring report', 'Monitoring Q3'], ['Blank document', 'Blank Doc']]) {
   await step(`template-${type}`, async () => {
     await newProject(() => win.locator('button.tpl', { hasText: type }).click(), title);
     await compile();
-    if (type === 'Conference paper') { expect(tex().includes('{article}') && tex().includes('twocolumn') && tex().includes('[10pt'), 'conference class options'); await shot('26-conference'); }
-    if (type === 'Thesis or dissertation') expect(tex().includes('{report}') && tex().includes('\\chapter{Introduction}'), 'thesis class');
+  });
+}
+
+const FORMATS = { 'ieee-conf': '[conference]{IEEEtran}', 'ieee-journal': '[journal]{IEEEtran}', acm: '[sigconf]{acmart}', elsevier: '{elsarticle}', 'springer-lncs': '[runningheads]{llncs}', aps: '{revtex4-2}', ams: '{amsart}', apa7: '{apa7}', article: '{article}' };
+for (const [fmt, cls] of Object.entries(FORMATS)) {
+  await step(`academic-${fmt}`, async () => {
+    await newProject(async () => {
+      await win.locator('button.tpl', { hasText: 'Academic paper' }).click();
+      await win.getByRole('combobox', { name: 'Journal format' }).selectOption(fmt);
+      if (fmt === 'acm') await shot('26-academic-formats');
+    }, `Paper ${fmt}`);
+    expect(tex().includes(cls), `${fmt}: class line ${tex().split('\n').slice(0, 2).join(' ')}`);
+    await compile();
+    const setupLayout = JSON.parse(tex('texwriter.json')).theme.classLayout;
+    expect(fmt === 'article' ? !setupLayout : setupLayout, `${fmt}: classLayout`);
+    if (fmt === 'ieee-conf') {
+      await win.getByRole('button', { name: 'Document setup' }).click();
+      await win.getByRole('heading', { name: 'Layout' }).waitFor();
+      await shot('26b-setup-journal');
+      await win.getByRole('button', { name: 'Cancel' }).click();
+    }
   });
 }
 
 await step('user-template-project', async () => {
   await newProject(async () => {
     await shot('27-home-templates');
-    await win.locator('.tpl', { hasText: 'Bank validation layout' }).locator('button').first().click();
+    await win.locator('.tpl', { hasText: 'Team model doc layout' }).locator('button').first().click();
   }, 'From My Template');
   const t = tex();
   expect(t.includes('\\title{From My Template}'), 'title not personalised');
-  expect(t.includes('\\section{Executive summary}'), 'layout sections missing');
+  expect(t.includes('\\section{How this example works}'), 'layout sections missing');
   await compile();
 });
 

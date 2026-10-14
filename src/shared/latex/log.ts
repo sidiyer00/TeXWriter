@@ -90,8 +90,8 @@ export function parseLatexLog(log: string, mainFile = 'report.tex', root = ''): 
 
   // warnings continue on lines that start with "(package)" or spaces
   const joined = text.replace(/\n\((?:natbib|hyperref|[a-z]+)\)\s+/g, ' ').replace(/\n(?=on input line)/g, ' ');
-  for (const mm of text.matchAll(/Quire: package (\S+) is not installed/g)) {
-    add({ severity: 'notice', kind: 'missing-file', message: `Package ${mm[1]} is not installed`, detail: 'Quire used the default font or layout instead. Install it with the MiKTeX Console (Packages) or tlmgr, then recompile.', key: `${mm[1]}.sty` });
+  for (const mm of text.matchAll(/TeXWriter: package (\S+) is not installed/g)) {
+    add({ severity: 'notice', kind: 'missing-file', message: `Package ${mm[1]} is not installed`, detail: 'TeXWriter used the default font or layout instead. Install it with the MiKTeX Console (Packages) or tlmgr, then recompile.', key: `${mm[1]}.sty` });
   }
 
   const refRe = /(?:LaTeX|Package \w+) Warning: Reference `([^']+)' on page (\d+)\s+undefined on input line (\d+)/g;

@@ -165,6 +165,18 @@ export function VisualEditor() {
   const syncIndex = useStore((s) => s.syncIndex);
   useEffect(() => { if (syncIndex !== null) scrollToBlock(syncIndex); }, [syncIndex]);
 
+  // "Show" on a generated block (Generated tab, error toasts): select it so its properties open
+  const focus = useStore((s) => s.focusBlock);
+  useEffect(() => {
+    const ed = editorRef.current;
+    if (!focus || !ed) return;
+    let pos = -1;
+    ed.state.doc.forEach((n, offset) => { if (pos < 0 && n.type.name === 'generatedBlock' && n.attrs.id === focus.id) pos = offset; });
+    if (pos < 0) return;
+    ed.view.dispatch(ed.state.tr.setSelection(NodeSelection.create(ed.state.doc, pos)));
+    (ed.view.nodeDOM(pos) as HTMLElement | null)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  }, [focus?.nonce]);
+
   const theme = useStore((s) => s.project?.manifest.theme);
   if (!hasDoc) {
     return (
@@ -172,7 +184,7 @@ export function VisualEditor() {
         <div className="page" style={{ minHeight: 200 }}>
           <div className="empty">
             <h3>Visual editing is paused</h3>
-            <div className="small muted">The main file has no <span className="mono">\begin{'{document}'}</span> … <span className="mono">\end{'{document}'}</span> pair, so Quire cannot tell the body from the preamble. Fix it in the LaTeX view and the visual editor comes back.</div>
+            <div className="small muted">The main file has no <span className="mono">\begin{'{document}'}</span> … <span className="mono">\end{'{document}'}</span> pair, so TeXWriter cannot tell the body from the preamble. Fix it in the LaTeX view and the visual editor comes back.</div>
             <button className="btn btn-sm" onClick={() => setState({ mode: 'source' })}>Open LaTeX source</button>
           </div>
         </div>

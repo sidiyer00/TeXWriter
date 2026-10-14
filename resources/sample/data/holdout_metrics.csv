@@ -1,0 +1,4 @@
+,Error,,Fit
+Sample,RMSE,MAE,R²
+Training,0.981,0.784,0.912
+Holdout,1.037,0.829,0.897

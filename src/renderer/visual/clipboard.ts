@@ -29,7 +29,7 @@ let plainNext = false;
 
 // ------------------------------------------------------------------ preferred style
 
-const STYLE_KEY = 'quire.pasteTableStyle';
+const STYLE_KEY = 'texwriter.pasteTableStyle';
 
 /** Style for pasted and converted tables: the one last picked from the table toolbar. */
 export function preferredTableStyle(): TableStyle {
@@ -149,7 +149,16 @@ export async function copyTableForSpreadsheet(ed: Editor): Promise<boolean> {
 
 // ------------------------------------------------------------------ plugin
 
-const key = new PluginKey('quireSpreadsheetClipboard');
+/**
+ * A click followed at once by Ctrl+V can deliver the paste before ProseMirror has read the
+ * caret's new position; let it process pending DOM selection changes first (a no-op when
+ * there are none).
+ */
+function syncSelectionFromDom(view: EditorView) {
+  (view as unknown as { domObserver?: { flush?: () => void } }).domObserver?.flush?.();
+}
+
+const key = new PluginKey('texwriterSpreadsheetClipboard');
 
 export const spreadsheetClipboardPlugin = () => {
   let plainUntil = 0;
@@ -164,6 +173,7 @@ export const spreadsheetClipboardPlugin = () => {
         if (plainNext || Date.now() < plainUntil) { plainUntil = 0; plainNext = false; return false; }
         const cd = event.clipboardData;
         if (!cd) return false;
+        syncSelectionFromDom(view);
         const html = cd.getData('text/html');
         const text = cd.getData('text/plain');
         // our own copies paste back exactly as they were

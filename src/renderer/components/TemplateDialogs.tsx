@@ -54,7 +54,7 @@ function SaveTemplateBody() {
       <button className="btn btn-pri" disabled={busy || !name.trim() || (!layout && !style)} onClick={() => void save()}>{busy ? 'Saving…' : 'Save template'}</button>
     </>}>
       <label className="f">Name<input className="field" value={name} onChange={(e) => setName(e.target.value)} /></label>
-      <label className="f">Description <span className="small muted">(optional)</span><input className="field" value={description} placeholder="e.g. Department validation report, 2026 format" onChange={(e) => setDescription(e.target.value)} /></label>
+      <label className="f">Description <span className="small muted">(optional)</span><input className="field" value={description} placeholder="e.g. Department model documentation, 2026 format" onChange={(e) => setDescription(e.target.value)} /></label>
       <label className="chk"><input type="checkbox" checked={layout} onChange={(e) => setLayout(e.target.checked)} /><span><b style={{ fontWeight: 600 }}>Layout</b> <span className="small muted">— document class, preamble, front matter and section structure ({texFiles.length} file{texFiles.length === 1 ? '' : 's'})</span></span></label>
       {layout && (
         <div className="col" style={{ gap: 4, paddingLeft: 24 }} role="radiogroup" aria-label="Content">
@@ -64,7 +64,7 @@ function SaveTemplateBody() {
         </div>
       )}
       <label className="chk"><input type="checkbox" checked={style} onChange={(e) => setStyle(e.target.checked)} /><span><b style={{ fontWeight: 600 }}>Style</b> <span className="small muted">— Document setup: paper, margins, fonts, spacing, colours, running heads</span></span></label>
-      <div className="small muted">Generated tables and figures, test results and data files are not included. Templates are saved for your user account and listed on the Home screen.</div>
+      <div className="small muted">Generated tables and figures, scripts and data files are not included. Templates are saved for your user account and listed on the Home screen.</div>
     </Dialog>
   );
 }
