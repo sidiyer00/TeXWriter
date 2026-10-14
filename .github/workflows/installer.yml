@@ -1,0 +1,72 @@
+# Builds the Windows installer (release/Quire-Setup-<version>.exe) on a Windows runner.
+# Every push and pull request: the installer is attached to the run as an artifact
+# (Actions → the run → Artifacts). Pushing a tag v<version> also publishes it as a
+# GitHub Release, which is the download link to give people.
+name: Windows installer
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+    paths-ignore: ['**.md', 'docs/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          want="v$(node -p "require('./package.json').version")"
+          [ "$GITHUB_REF_NAME" = "$want" ] || { echo "Tag $GITHUB_REF_NAME does not match package.json ($want)"; exit 1; }
+
+      - run: npm ci
+
+      - run: npm test
+
+      # typecheck + main + renderer build, then electron-builder --win nsis (unsigned)
+      - run: npm run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Smoke test - silent install and launch check
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem release -Filter 'Quire-Setup-*.exe' | Select-Object -First 1
+          Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter 'Quire.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw 'Quire.exe was not installed' }
+          Write-Host "Installed: $($exe.FullName)"
+          if (-not (Test-Path (Join-Path $exe.DirectoryName 'resources\resources\sample\report.tex'))) { throw 'Sample project resources missing from the install' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Quire-Setup-${{ github.sha }}
+          path: release/Quire-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/Quire-Setup-*.exe
+          generate_release_notes: true
