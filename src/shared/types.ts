@@ -1,6 +1,33 @@
 // Types shared by the main process, preload bridge and renderer.
 
-export type ReportType = 'validation' | 'documentation' | 'monitoring' | 'performance' | 'blank';
+export type ReportType =
+  | 'validation' | 'documentation' | 'monitoring' | 'performance'
+  | 'article' | 'conference' | 'thesis' | 'apa' | 'working' | 'proposal' | 'techreport'
+  | 'blank';
+
+/**
+ * A template the user saved (File → Save as template, Document setup → Save style, or a
+ * .tex file imported from a journal/university). Lives in <userData>/templates/<id>.json.
+ */
+export interface UserTemplate {
+  id: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  /** carries document structure: the class, preamble and body (`files`) */
+  layout: boolean;
+  /** carries Document setup values (page, fonts, colours) */
+  style: boolean;
+  /** built-in sections to start from when the template has no layout */
+  baseType: ReportType;
+  /** project-relative text files (.tex, .sty, .cls, .bib, .bst); `mainFile` is one of them */
+  files?: Record<string, string>;
+  mainFile?: string;
+  theme?: ThemeSettings;
+  engine?: Engine;
+}
+
+export type UserTemplateInput = Omit<UserTemplate, 'id' | 'createdAt'> & { id?: string };
 export type Engine = 'pdflatex' | 'lualatex' | 'xelatex';
 export type TestStatus = 'passed' | 'failed' | 'warning' | 'skipped';
 
@@ -50,6 +77,17 @@ export interface GeneratedBlockConfig {
   sourceLine?: boolean;
   fitWidth?: boolean;
   style?: 'booktabs' | 'grid' | 'minimal';
+  // tables linked to a data file in the project (CSV/TSV) instead of a test run
+  /** project-relative data file, e.g. data/grades.csv; set = the block follows this file, not a run */
+  dataFile?: string;
+  /** header rows at the top of the file (undefined = detect); merged labels become multi-level headers */
+  headerRows?: number;
+  /** any table style from the editor (booktabs, striped, lines, minimal, boxed, grid, plain) */
+  tableStyle?: string;
+  /** number format for numeric body cells (numfmt encoding, e.g. "num,d2,sep"); unset = as written */
+  numberFormat?: string;
+  /** \small, \footnotesize, … */
+  size?: string;
   // summary options
   template?: string;
   // figure options
@@ -195,6 +233,8 @@ export interface CreateProjectOptions {
   owner?: string;
   includeSampleSuite: boolean;
   engine: Engine;
+  /** start from a saved user template instead of the built-in sections */
+  templateId?: string;
 }
 
 export interface ToolchainInfo {
@@ -304,6 +344,12 @@ export interface QuireApi {
   editCommand(cmd: 'cut' | 'copy' | 'paste' | 'selectAll' | 'undo' | 'redo'): Promise<void>;
   setZoom(factor: number): Promise<void>;
   appInfo(): Promise<{ version: string; electron: string; chrome: string; node: string; userData: string }>;
+  listTemplates(): Promise<UserTemplate[]>;
+  saveTemplate(t: UserTemplateInput): Promise<UserTemplate>;
+  deleteTemplate(id: string): Promise<void>;
+  /** a .tex file plus the class/style/bib files next to it, as a layout template */
+  importTemplateFile(absPath: string, name: string): Promise<UserTemplate>;
+  openTemplatesFolder(): Promise<void>;
   /** Main asks the renderer to save before the window closes. */
   onFlush(cb: () => Promise<void> | void): () => void;
 }

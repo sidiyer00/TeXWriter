@@ -15,7 +15,10 @@ import { toml } from '@codemirror/legacy-modes/mode/toml';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
 import { javascript, json } from '@codemirror/legacy-modes/mode/javascript';
 import { tags as t } from '@lezer/highlight';
-import { allDiagnostics, api, getState, mainBlockLines, mainFile, openContextMenu, setFileText, setState, useStore } from '../store';
+import { allDiagnostics, api, getState, mainBlockLines, mainFile, openContextMenu, setFileText, setState, toast, useStore } from '../store';
+import { htmlTableToGrid, preferredTableStyle, textToGrid } from '../visual/clipboard';
+import { gridToTableBlock } from '../../shared/latex/grid';
+import { serializeTableBlock } from '../../shared/latex/table';
 import { editorRef } from '../visual/editorRef';
 import { documentAutocomplete } from '../latexCompletions';
 import { followInSource } from '../visual/navigate';
@@ -149,6 +152,23 @@ export function SourceEditor({ file }: { file: string }) {
               const l = v.state.doc.lineAt(pos);
               e.preventDefault();
               void followInSource(l.text, pos - l.from, file);
+              return true;
+            },
+            // spreadsheet ranges (Excel/Sheets HTML or tab-separated text) paste as a tabular
+            paste: (e, v) => {
+              if (!lang.latex || readOnly || !e.clipboardData) return false;
+              const html = e.clipboardData.getData('text/html');
+              const text = e.clipboardData.getData('text/plain');
+              const g = (html && htmlTableToGrid(html)) || (text.includes('\t') ? textToGrid(text) : null);
+              if (!g) return false;
+              e.preventDefault();
+              const latex = serializeTableBlock(gridToTableBlock(g, { style: preferredTableStyle() }));
+              const sel = v.state.selection.main;
+              v.dispatch({ changes: { from: sel.from, to: sel.to, insert: latex }, selection: { anchor: sel.from + latex.length }, userEvent: 'input.paste', scrollIntoView: true });
+              toast('Pasted spreadsheet cells as a LaTeX table.', 'ok', {
+                label: 'Paste as text',
+                run: () => { if (v.state.sliceDoc(sel.from, sel.from + latex.length) === latex) v.dispatch({ changes: { from: sel.from, to: sel.from + latex.length, insert: text }, userEvent: 'input.paste' }); },
+              });
               return true;
             },
             contextmenu: (e, v) => {

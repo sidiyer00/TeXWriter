@@ -2,11 +2,12 @@
 // under the cursor (merged in by ContextMenu because the list starts with Cut/Copy/Paste).
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import type { Editor } from '@tiptap/react';
-import { api, getState, gotoSource, mainFile, openContextMenu, setState, type MenuItem } from '../store';
+import { api, getState, gotoSource, mainFile, openContextMenu, setState, toast, type MenuItem } from '../store';
 import { insertLink, insertMenu, newComment, followAtCursor } from '../commands';
 import { HIGHLIGHTS, TEXT_COLORS } from './marks';
 import { TABLE_STYLES } from '../../shared/latex/table';
-import { applyNumberFormat, selectColumnOrRow, setColumnAlign, setTableBlockAttrs, tableBlockAt } from './table';
+import { addHeaderLevel, applyNumberFormat, selectColumnOrRow, setColumnAlign, setTableBlockAttrs, tableBlockAt } from './table';
+import { copyTableForSpreadsheet } from './clipboard';
 import { stepDecimals } from '../../shared/latex/numfmt';
 import { addColumn, deleteColumn } from '../components/Toolbar';
 import { editorBlockLines } from './VisualEditor';
@@ -94,6 +95,7 @@ export function visualContextMenu(ed: Editor, e: MouseEvent) {
       { label: 'Merge cells', disabled: !ed.can().mergeCells(), run: () => c().mergeCells().run() },
       { label: 'Split cell', disabled: !ed.can().splitCell(), run: () => c().splitCell().run() },
       { label: 'Toggle header cells', run: () => c().toggleHeaderCell().run() },
+      { label: 'Add header level', run: () => addHeaderLevel(ed) },
       { label: 'Select column', run: () => selectColumnOrRow(ed, 'column') },
       { label: 'Select row', run: () => selectColumnOrRow(ed, 'row') },
       { separator: true },
@@ -105,6 +107,8 @@ export function visualContextMenu(ed: Editor, e: MouseEvent) {
         { label: 'Left', run: () => setColumnAlign(ed, 'l') }, { label: 'Centre', run: () => setColumnAlign(ed, 'c') }, { label: 'Right', run: () => setColumnAlign(ed, 'r') },
       ] },
       { label: 'Style', submenu: TABLE_STYLES.map((t) => ({ label: t.label, checked: tb?.node.attrs.style === t.id, run: () => setTableBlockAttrs(ed, { style: t.id }) })) },
+      { separator: true },
+      { label: 'Copy table for Excel', run: () => void copyTableForSpreadsheet(ed).then((ok) => ok && toast('Table copied. Paste it into Excel or Google Sheets; merged headers are kept.', 'ok')) },
       { separator: true },
       { label: 'Delete row', run: () => c().deleteRow().run() },
       { label: 'Delete column', run: deleteColumn },

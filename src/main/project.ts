@@ -5,7 +5,10 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { CreateProjectOptions, OpenProject, ProjectFile, ProjectManifest, ProjectState, RecentProject } from '../shared/types';
 import { DEFAULT_THEME } from '../shared/latex/theme';
-import { SAMPLE_BLOCKS, STARTER_BIB, defaultManifest, pendingTex, preambleTex, reportTex } from './templates';
+import { SAMPLE_BLOCKS, STARTER_BIB, defaultManifest, pendingTex, preambleOptionsFor, preambleTex, reportTex } from './templates';
+import { readTemplate } from './userTemplates';
+import { THEME_BEGIN, applyThemeToClass, applyThemeToPreamble } from '../shared/latex/theme';
+import { personalize } from '../shared/latex/skeleton';
 import { listRuns } from './runs';
 
 export const MANIFEST = 'quire.json';
@@ -130,12 +133,33 @@ export async function createProject(o: CreateProjectOptions): Promise<OpenProjec
     const entries = await fsp.readdir(root);
     if (entries.length) throw new Error(`The folder “${o.folderName}” already exists and is not empty.`);
   }
+  const tpl = o.templateId ? await readTemplate(o.templateId) : null;
+  const type = tpl ? tpl.baseType : o.reportType;
   await fsp.mkdir(path.join(root, 'generated'), { recursive: true });
   await fsp.mkdir(path.join(root, 'figures'), { recursive: true });
-  const m = defaultManifest(o.name, o.reportType, o.engine, { modelId: o.modelId, owner: o.owner, withSuite: o.includeSampleSuite });
-  await fsp.writeFile(path.join(root, 'report.tex'), reportTex(o.reportType, o.name, o.owner, o.modelId), 'utf8');
-  await fsp.writeFile(path.join(root, 'preamble.tex'), preambleTex(m.theme), 'utf8');
-  await fsp.writeFile(path.join(root, 'references.bib'), STARTER_BIB, 'utf8');
+  const m = defaultManifest(o.name, type, o.engine, { modelId: o.modelId, owner: o.owner, withSuite: o.includeSampleSuite });
+  if (tpl?.style && tpl.theme) m.theme = { ...m.theme, ...tpl.theme, margins: { ...m.theme.margins, ...tpl.theme.margins }, headerLeft: o.name };
+  if (tpl?.engine) m.engine = tpl.engine;
+  if (tpl?.layout && tpl.files && tpl.mainFile && tpl.files[tpl.mainFile]) {
+    // a saved layout: its files as they were, with the new title and author
+    for (const [rel, text] of Object.entries(tpl.files)) {
+      const abs = safeJoin(root, rel);
+      await fsp.mkdir(path.dirname(abs), { recursive: true });
+      let out = text;
+      // Document setup values are applied only where the template carries a style or a
+      // Quire-managed preamble block; an imported journal class keeps its own options
+      if (rel === tpl.mainFile) out = personalize(text, { title: o.name, author: o.owner });
+      if (rel === tpl.mainFile && tpl.style) out = applyThemeToClass(out, m.theme);
+      else if (rel === 'preamble.tex' && text.includes(THEME_BEGIN)) out = applyThemeToPreamble(text, m.theme);
+      await fsp.writeFile(abs, out, 'utf8');
+    }
+    m.mainFile = tpl.mainFile;
+    if (!tpl.files['references.bib'] && /\\bibliography\{references\}/.test(tpl.files[tpl.mainFile])) await fsp.writeFile(path.join(root, 'references.bib'), STARTER_BIB, 'utf8');
+  } else {
+    await fsp.writeFile(path.join(root, 'report.tex'), applyThemeToClass(reportTex(type, o.name, o.owner, o.modelId), m.theme), 'utf8');
+    await fsp.writeFile(path.join(root, 'preamble.tex'), preambleTex(m.theme, preambleOptionsFor(type)), 'utf8');
+    await fsp.writeFile(path.join(root, 'references.bib'), STARTER_BIB, 'utf8');
+  }
   await fsp.writeFile(path.join(root, '.gitignore'), '.quire/\nruns/*/outputs/*.pdf\n__pycache__/\n', 'utf8');
   if (o.includeSampleSuite) {
     const res = resourcesDir();

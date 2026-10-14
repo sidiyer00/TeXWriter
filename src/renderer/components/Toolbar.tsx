@@ -8,7 +8,8 @@ import { MenuList, below, type Anchor } from './Menu';
 import { useOutside } from './Chrome';
 import { Down, List, OList } from './Icons';
 import { HIGHLIGHTS, TEXT_COLORS, cssColor } from '../visual/marks';
-import { applyNumberFormat, columnAlignAt, currentNumber, selectColumnOrRow, setCellValue, setColumnAlign, setTableBlockAttrs, tableBlockAt, currentColumns } from '../visual/table';
+import { applyNumberFormat, columnAlignAt, currentNumber, selectColumnOrRow, setCellValue, setColumnAlign, setTableBlockAttrs, tableBlockAt, currentColumns, addHeaderLevel } from '../visual/table';
+import { copyTableForSpreadsheet } from '../visual/clipboard';
 import { HEADER_FILLS, TABLE_SIZES, TABLE_SPACING, TABLE_STYLES } from '../../shared/latex/table';
 import { NUM_KINDS, defaultFormat, describeFormat, stepDecimals, type NumKind } from '../../shared/latex/numfmt';
 
@@ -290,6 +291,7 @@ function TableToolbar() {
     { id: 'del-col', group: 'del', priority: 4, node: b('del-col', 'Delete column', deleteColumn), menu: { label: 'Delete column', run: deleteColumn } },
     { id: 'merge', group: 'merge', priority: 2, node: b('merge', 'Merge cells', () => c().mergeCells().run(), 'Select cells by dragging, then merge'), menu: { label: 'Merge cells', run: () => c().mergeCells().run() } },
     { id: 'split', group: 'merge', priority: 3, node: b('split', 'Split cell', () => c().splitCell().run()), menu: { label: 'Split cell', run: () => c().splitCell().run() } },
+    { id: 'hlevel', group: 'hdr', priority: 3, node: b('hlevel', '+ Header level', () => addHeaderLevel(ed), 'Add a header row above the table for group labels; select the cells a label spans and Merge cells'), menu: { label: 'Add header level', run: () => addHeaderLevel(ed) } },
     { id: 'hdr', group: 'hdr', priority: 3, node: b('hdr', 'Header cells', () => c().toggleHeaderCell().run(), 'Toggle header styling for the selected cells (select a whole row for a second header level)'), menu: { label: 'Toggle header cells', run: () => c().toggleHeaderCell().run() } },
     { id: 'cellcolor', group: 'hdr', priority: 3, node: <CellColor />, menu: { label: 'Clear cell colour', run: () => c().setCellAttribute('background', null).run() } },
     { id: 'al', group: 'align', priority: 3, node: b('al', 'Left', () => setColumnAlign(ed, 'l'), 'Align column left', align === 'l'), menu: { label: 'Align column left', run: () => setColumnAlign(ed, 'l') } },
@@ -311,6 +313,7 @@ function TableToolbar() {
     { label: 'Caption above table', checked: ta.captionPos !== 'bottom', run: () => setTableBlockAttrs(ed, { captionPos: 'top' }) },
     { label: 'Caption below table', checked: ta.captionPos === 'bottom', run: () => setTableBlockAttrs(ed, { captionPos: 'bottom' }) },
     { separator: true },
+    { label: 'Copy table for Excel', run: () => void copyTableForSpreadsheet(ed).then((ok) => ok && toast('Table copied. Paste it into Excel or Google Sheets; merged headers are kept.', 'ok')) },
     { label: 'Table properties', run: () => setState({ panel: { open: true, tab: 'properties' } }) },
     { label: 'Delete table', danger: true, run: () => { const t = tableBlockAt(ed); if (t) ed.view.dispatch(ed.state.tr.delete(t.pos, t.pos + t.node.nodeSize)); } },
   ];

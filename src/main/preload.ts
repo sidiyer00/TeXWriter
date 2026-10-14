@@ -60,6 +60,11 @@ const api: QuireApi = {
   editCommand: (c) => call('editCommand', c),
   setZoom: (f) => call('setZoom', f),
   appInfo: () => call('appInfo'),
+  listTemplates: () => call('listTemplates'),
+  saveTemplate: (t) => call('saveTemplate', t),
+  deleteTemplate: (id) => call('deleteTemplate', id),
+  importTemplateFile: (abs, name) => call('importTemplateFile', abs, name),
+  openTemplatesFolder: () => call('openTemplatesFolder'),
   onFlush: (cb) => on('flush', async () => { try { await cb(); } finally { ipcRenderer.send('flushed'); } }),
 };
 

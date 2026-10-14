@@ -13,12 +13,13 @@ import { useEffect, useRef, useState, type ReactElement } from 'react';
 import type { TableView } from '../../shared/generate';
 import { numberDocument, refDisplay, shortAuthor } from '../../shared/latex/refs';
 import type { JNode } from '../../shared/latex/model';
-import { getState, useStore, refreshBlock, gotoSource, mainFile, mainBlockLines, api, setState, latestRun } from '../store';
+import { getState, useStore, refreshBlock, gotoSource, mainFile, mainBlockLines, api, setState, latestRun, openTab } from '../store';
 import { Refresh, Link } from '../components/Icons';
 import { loadPdfCached, renderPage } from '../pdf';
 import { parseInline } from '../../shared/latex/inline';
 import { TextColor, QuireHighlight } from './marks';
 import { TableBlock, QTable, QTableRow, QTableHeader, QTableCell } from './table';
+import { SpreadsheetClipboard } from './clipboard';
 import { Find } from './find';
 import { isMod } from '../keys';
 import { Comments } from './comments';
@@ -253,10 +254,13 @@ function ago(iso?: string) {
 }
 
 export function TablePreview({ view }: { view: TableView }) {
-  const numeric = view.columns.map((_, j) => view.rows.every((r) => /^[-+−]?[\d,.]+%?$|^—?$|^$/.test(r.cells[j] ?? '')));
+  const numeric = view.columns.map((_, j) => view.rows.every((r) => /^[-+−(]?[$€£¥]?[\d,.]+%?\)?$|^—?$|^$/.test(r.cells[j] ?? '')));
+  const multi = !!view.headers && view.headers.length > 1;
   return (
     <table className={`dtable ${view.style}`}>
-      <thead><tr>{view.columns.map((c, j) => <th key={j} className={numeric[j] ? 'n' : 'l'} scope="col">{c}</th>)}</tr></thead>
+      {multi
+        ? <thead>{view.headers!.map((row, i) => <tr key={i}>{row.map((c, j) => <th key={j} colSpan={c.colspan} rowSpan={c.rowspan} className={c.colspan > 1 ? 'grp' : 'l'} scope={c.colspan > 1 ? 'colgroup' : 'col'}>{c.text}</th>)}</tr>)}</thead>
+        : view.columns.some(Boolean) && <thead><tr>{view.columns.map((c, j) => <th key={j} className={numeric[j] ? 'n' : 'l'} scope="col">{c}</th>)}</tr></thead>}
       <tbody>
         {view.rows.map((r, i) => (
           <tr key={i} className={`${r.highlight ? 'hl' : ''} ${r.total ? 'total' : ''}`}>
@@ -284,7 +288,9 @@ function GeneratedBlockView(props: ReactNodeViewProps) {
     );
   }
   const st = render?.status ?? 'pending';
-  const tag = st === 'fresh' ? `Generated · run #${cfg.run} · ${ago(cfg.refreshedAt)}`
+  const data = cfg.dataFile;
+  const tag = data && (st === 'fresh' || st === 'stale') ? `Linked to ${data} · updated ${ago(cfg.refreshedAt)}`
+    : st === 'fresh' ? `Generated · run #${cfg.run} · ${ago(cfg.refreshedAt)}`
     : st === 'stale' ? `Stale · from run #${cfg.run} · run #${latest} available`
     : st === 'pending' ? 'Generated · pending first test run'
     : st === 'conflict' ? 'Edited in source · not linked'
@@ -297,14 +303,16 @@ function GeneratedBlockView(props: ReactNodeViewProps) {
       <span className="blk-tag"><Link size={11} />{busy ? 'Refreshing…' : tag}</span>
       <div className="blk-actions" contentEditable={false}>
         {(st === 'stale' || st === 'fresh' || st === 'missing') && <button className="tb" onClick={doRefresh}><Refresh />Refresh</button>}
-        <button className="tb" onClick={(e) => { e.stopPropagation(); setState({ view: 'tests', selectedRun: cfg.run || getState().selectedRun, selectedTest: cfg.testIds[0] ?? null }); }}>Open run</button>
+        {data
+          ? <button className="tb" onClick={(e) => { e.stopPropagation(); void openTab(data); }}>Open data</button>
+          : <button className="tb" onClick={(e) => { e.stopPropagation(); setState({ view: 'tests', selectedRun: cfg.run || getState().selectedRun, selectedTest: cfg.testIds[0] ?? null }); }}>Open run</button>}
         <button className="tb" onClick={(e) => { e.stopPropagation(); jumpToBlockSource(props); }}>View source</button>
       </div>
       {cfg.kind === 'table' && (
         <>
           <div className="cap"><b>Table {num ?? ''}</b><RichInline latex={cfg.caption ?? ''} /></div>
           {view?.kind === 'table' ? <div style={{ overflowX: 'auto' }}><TablePreview view={view} /></div> : <div className="placeholder-box">{st === 'pending' ? 'Run the test suite to fill this table.' : render?.message}</div>}
-          {view?.kind === 'table' && cfg.sourceLine !== false && <div className="srcline">Source: {view.sourceLine}.</div>}
+          {view?.kind === 'table' && (data ? !!cfg.sourceLine : cfg.sourceLine !== false) && <div className="srcline">Source: {view.sourceLine}.</div>}
         </>
       )}
       {cfg.kind === 'summary' && (
@@ -520,6 +528,7 @@ const AppKeys = Extension.create({
 export function extensions() {
   return [
     AppKeys,
+    SpreadsheetClipboard,
     ProtectAtoms,
     StarterKit.configure({ heading: false, codeBlock: false, blockquote: false, horizontalRule: false, strike: false, link: { openOnClick: false, autolink: true, linkOnPaste: true, HTMLAttributes: { rel: null, target: null, class: 'qlink' } } }),
     QHeading,
