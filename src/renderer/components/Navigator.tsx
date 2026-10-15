@@ -8,7 +8,7 @@ import { editorRef } from '../visual/editorRef';
 import { scrollToBlock } from '../visual/VisualEditor';
 import { canonicalBlock } from '../../shared/latex/blocks';
 import type { JNode } from '../../shared/latex/model';
-import { shortAuthor } from '../../shared/latex/refs';
+import { floatEntries, shortAuthor } from '../../shared/latex/refs';
 
 /** Map a parsed-block index to the editor's top-level index (empty paragraphs exist only in the editor). */
 export function editorIndexForParsed(i: number): number {
@@ -150,7 +150,7 @@ function GeneratedList() {
   const renders = useStore((s) => s.renders);
   const gen = useStore((s) => s.generating);
   const list = Object.values(blocks);
-  const scripted = list.filter((b) => b.script).length;
+  const runnable = list.filter((b) => b.script || b.output).length;
   const add = (kind: 'table' | 'figure') => setState({ dialog: 'generated', generatedInit: { kind, mode: 'new' } });
   return (
     <div className="col" style={{ padding: '0 4px', gap: 8 }}>
@@ -158,7 +158,7 @@ function GeneratedList() {
         <button className="btn btn-sm" onClick={() => add('table')}>+ Table</button>
         <button className="btn btn-sm" onClick={() => add('figure')}>+ Figure</button>
         {gen ? <button className="btn btn-sm" style={{ marginLeft: 'auto' }} onClick={() => cancelGenerators()}>Stop</button>
-          : <button className="btn btn-sm btn-pri" style={{ marginLeft: 'auto' }} disabled={!scripted} onClick={() => void runAllGenerators()}><Play />Run all</button>}
+          : <button className="btn btn-sm btn-pri" style={{ marginLeft: 'auto' }} disabled={!runnable} onClick={() => void runAllGenerators()}><Play />Run all</button>}
       </div>
       {list.length === 0 && (
         <div className="empty small">
@@ -177,12 +177,12 @@ function GeneratedList() {
               <span className="mono small muted ellipsis" style={{ width: '100%' }}>{b.script ?? b.output ?? 'no source'}</span>
               <span className={`small ${st === 'failed' || st === 'missing' ? 't-fail' : 'muted'}`}>{text}</span>
             </button>
-            {b.script && <button className="btn btn-q btn-xs" disabled={!!gen} title={`Run ${b.script}`} aria-label={`Run ${b.script}`} onClick={() => void runGenerator(b.id)}><Play /></button>}
+            {(b.script || b.output) && <button className="btn btn-q btn-xs" disabled={!!gen} title={b.script ? `Run ${b.script}` : `Read ${b.output} again`} aria-label={b.script ? `Run ${b.script}` : `Read ${b.output} again`} onClick={() => void runGenerator(b.id)}><Play /></button>}
             <button className="btn btn-q btn-xs gen-del" disabled={gen?.id === b.id} title={`Delete from the document${b.script ? ` (keeps ${b.script})` : ''}`} aria-label={`Delete ${b.kind} ${b.label || b.id}`} onClick={() => void deleteBlock(b.id)}><Trash /></button>
           </div>
         );
       })}
-      {list.length > 0 && <div className="small muted" style={{ padding: '4px 4px 0' }}>Click one to see it in the document with its script, output and log. Ctrl+Shift+G runs all scripts.</div>}
+      {list.length > 0 && <div className="small muted" style={{ padding: '4px 4px 0' }}>Click one to see it in the document with its script, output and log. Ctrl+Shift+G runs them all.</div>}
     </div>
   );
 }
@@ -199,14 +199,7 @@ function OutlineHead({ title, open, onToggle, count }: { title: string; open: bo
 function FloatList({ kind, title, open, onToggle }: { kind: 'table' | 'figure'; title: string; open: boolean; onToggle: () => void }) {
   const outline = useStore((s) => s.outline);
   const labels = useStore((s) => s.labels);
-  const items = useMemo(() => {
-    const byLabel = new Map([...labels.values()].map((l) => [l.label, l]));
-    return outline.flatMap((o) => o.children.filter((c) => c.kind === kind)).map((c) => {
-      const num = c.text.replace(/^\S+\s+/, '');
-      const cap = c.label ? byLabel.get(c.label)?.title ?? '' : '';
-      return { ...c, num, caption: cap.replace(/\\[a-zA-Z]+\*?(\[[^\]]*\])?\{([^}]*)\}/g, '$2').replace(/[{}$\\]/g, '').trim() };
-    });
-  }, [outline, labels, kind]);
+  const items = useMemo(() => floatEntries(outline, labels, kind), [outline, labels, kind]);
   return (
     <>
       <OutlineHead title={title} open={open} onToggle={onToggle} count={items.length} />

@@ -62,7 +62,7 @@ ${numbering}
 
 interface Sec { title: string; label?: string; text: string; subs?: string[] }
 
-const REPORT_FRONT = '\\maketitle\n\n\\tableofcontents\n\n\\clearpage';
+const REPORT_FRONT = '\\maketitle\n\n\\tableofcontents\n\n\\texwriterlistoftablesandfigures\n\n\\clearpage';
 const ACADEMIC_THEME: Partial<ThemeSettings> = { headerRight: '', parSkip: false, headingFont: 'body', fontSize: 11, bodyFont: 'pagella', lineSpread: 1.1 };
 
 const MODEL_DOC: Sec[] = [

@@ -371,6 +371,12 @@ export function parseBody(body: string): { leading: string; blocks: ParsedBlock[
     let to = j;
     while (to > i && /\s/.test(body[to - 1])) to--;
     const chunk = body.slice(i, to);
+    // \texwriterindent{N} Text: body text indented N steps (Tab in the visual editor)
+    const ind = /^\\texwriterindent\{([1-9])\}[ \t]*/.exec(chunk);
+    if (ind) {
+      const inl = tryInline(chunk.slice(ind[0].length));
+      if (inl) { i = push({ type: 'paragraph', attrs: { indent: Number(ind[1]) }, content: inl.length ? inl : undefined }, i, to); continue; }
+    }
     if (cmd && !INLINE_COMMANDS.has(cmd.name)) {
       // starts with a structural command we don't model: keep raw, but only this line
       // when the command occupies the line by itself (e.g. \tableofcontents)
@@ -428,7 +434,7 @@ export function canonicalBlock(node: JNode, pad = ''): string {
   const a = node.attrs ?? {};
   switch (node.type) {
     case 'paragraph':
-      return wrap(serializeInline(node.content, true), 88);
+      return wrap((a.indent ? `\\texwriterindent{${a.indent}} ` : '') + serializeInline(node.content, true), 88);
     case 'heading': {
       // keep the command the source used (\chapter) unless the level was changed since
       const lvl = a.level ?? 1;

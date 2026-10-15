@@ -5,11 +5,11 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 export const MAX_HEADING = 5;
 
 export const HEADING_STYLES = [
-  { level: 1, label: 'Section', cmd: 'section' },
-  { level: 2, label: 'Subsection', cmd: 'subsection' },
-  { level: 3, label: 'Subsubsection', cmd: 'subsubsection' },
-  { level: 4, label: 'Paragraph heading', cmd: 'paragraph' },
-  { level: 5, label: 'Subparagraph heading', cmd: 'subparagraph' },
+  { level: 1, label: 'Heading 1', cmd: 'section' },
+  { level: 2, label: 'Heading 2', cmd: 'subsection' },
+  { level: 3, label: 'Heading 3', cmd: 'subsubsection' },
+  { level: 4, label: 'Heading 4', cmd: 'paragraph' },
+  { level: 5, label: 'Heading 5', cmd: 'subparagraph' },
 ] as const;
 
 /** The heading holding the cursor, if any. */

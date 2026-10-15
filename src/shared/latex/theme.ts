@@ -67,7 +67,7 @@ const hex = (s: string) => s.replace(/^#/, '').toUpperCase().padEnd(6, '0').slic
 const tex = (s: string) => s.replace(/([%&#_$])/g, '\\$1');
 
 /** Version of the support macros below; bump when they change so projects are migrated. */
-export const SUPPORT_VERSION = 'texwriter-support-v5';
+export const SUPPORT_VERSION = 'texwriter-support-v7';
 
 /** Macros the visual editor emits (highlights, merged table cells). Safe to load twice. */
 /**
@@ -90,6 +90,17 @@ export const SUPPORT_MACROS = [
   '\\ifx\\rowcolors\\undefined\\providecommand{\\rowcolors}[3]{}\\fi',
   '% \\qnum[format]{value}{shown}: number-formatted table cell; prints only the shown text',
   '\\providecommand{\\qnum}[3][]{#3}',
+  '% \\texwriterindent{N}: body text indented N steps of 2em (Tab in the visual editor)',
+  '\\providecommand{\\texwriterindent}[1]{\\leavevmode\\hangindent=#1\\dimexpr2em\\relax\\hangafter=0\\relax\\ignorespaces}',
+  '% \\texwriterlistoftablesandfigures: one section listing tables, then figures ("Table 2.1. Caption ..... 5")',
+  '\\makeatletter',
+  '\\providecommand{\\texwriterlistoftablesandfigures}{\\begingroup',
+  '  \\@ifundefined{chapter}{\\section*}{\\chapter*}{List of Tables and Figures}%',
+  '  \\@ifundefined{@dottedtocline}{}{\\def\\l@table{\\@dottedtocline{1}{0em}{2.3em}}\\let\\l@figure\\l@table}%',
+  '  \\def\\numberline##1{\\texwriterfloatname~##1.\\enskip}%',
+  '  \\def\\texwriterfloatname{\\tablename}\\@starttoc{lot}\\par\\bigskip',
+  '  \\def\\texwriterfloatname{\\figurename}\\@starttoc{lof}\\par\\endgroup}',
+  '\\makeatother',
 ];
 
 export function themeBlock(t: ThemeSettings): string {
@@ -112,6 +123,13 @@ export function themeBlock(t: ThemeSettings): string {
     `\\definecolor{texwritercalloutfill}{HTML}{${hex(t.calloutFill)}}`,
     '\\color{texwritertext}',
     '\\hypersetup{colorlinks=true,linkcolor=texwriterlink,citecolor=texwriterlink,urlcolor=texwriterlink}',
+    '% Heading 4 and 5 (\\paragraph, \\subparagraph): numbered, on a line of their own like the editor shows them',
+    '\\setcounter{secnumdepth}{5}',
+    '\\makeatletter',
+    `\\renewcommand\\paragraph{\\@startsection{paragraph}{4}{\\z@}{3.25ex \\@plus1ex \\@minus.2ex}{.6ex \\@plus.2ex}{\\normalfont\\normalsize\\bfseries${t.headingFont === 'sans' ? '\\sffamily' : ''}}}`,
+    `\\renewcommand\\subparagraph{\\@startsection{subparagraph}{5}{\\z@}{3.25ex \\@plus1ex \\@minus.2ex}{.6ex \\@plus.2ex}{\\normalfont\\normalsize\\bfseries\\itshape${t.headingFont === 'sans' ? '\\sffamily' : ''}}}`,
+    '\\makeatother',
+    '\\def\\paragraphautorefname{Section}\\def\\subparagraphautorefname{Section}',
     `\\newcommand{\\texwriterheadleft}{${tex(t.headerLeft)}}`,
     `\\newcommand{\\texwriterheadright}{${tex(t.headerRight)}}`,
     '% names used by preambles written by Quire (the app\'s earlier name)',

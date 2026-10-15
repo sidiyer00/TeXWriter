@@ -129,9 +129,9 @@ export function BackButton({ label = 'Back to report' }: { label?: string }) {
 /** Runs the script of every generated table and figure (Ctrl+Shift+G). */
 export function RunAllButton() {
   const gen = useStore((s) => s.generating);
-  const count = useStore((s) => Object.values(s.project?.manifest.blocks ?? {}).filter((b) => b.script).length);
+  const count = useStore((s) => Object.values(s.project?.manifest.blocks ?? {}).filter((b) => b.script || b.output).length);
   if (gen) return <button className="btn no-drag" onClick={() => cancelGenerators()} title="Stop the running script">{gen.total > 1 ? `Running ${gen.done + 1}/${gen.total}` : 'Running…'} · Stop</button>;
-  return <button className="btn no-drag" onClick={() => void runAllGenerators()} title={count ? `Run the scripts of ${count} generated table${count === 1 ? '' : 's'}/figure${count === 1 ? '' : 's'} and update them (Ctrl+Shift+G)` : 'Run the scripts behind generated tables and figures (Ctrl+Shift+G)'} aria-label="Run all"><Play /><span className="tlabel">Run all</span></button>;
+  return <button className="btn no-drag" onClick={() => void runAllGenerators()} title={count ? `Update ${count} generated table${count === 1 ? '' : 's'}/figure${count === 1 ? '' : 's'}: run their scripts and re-read their data files (Ctrl+Shift+G)` : 'Run the scripts and re-read the data files behind generated tables and figures (Ctrl+Shift+G)'} aria-label="Run all"><Play /><span className="tlabel">Run all</span></button>;
 }
 
 export function StatusBar({ children }: { children?: ReactNode }) {

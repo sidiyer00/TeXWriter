@@ -13,7 +13,7 @@ import { ContextMenu } from './components/Menu';
 import { GeneratedDialog } from './components/GeneratedDialog';
 import { SaveTemplateDialog } from './components/TemplateDialogs';
 import { AboutDialog, EquationModal, InsertTableDialog, NumberFormatDialog, PickerDialog, PromptDialog, QuickOpen, ShortcutsDialog } from './components/Dialogs';
-import { followAtCursor, initZoom, insertEquation, insertInlineMath, insertLink, newComment, nextIssue, openFind, setZoom, zoomBy } from './commands';
+import { followAtCursor, insertEquation, insertInlineMath, insertLink, newComment, nextIssue, openFind, setZoom, zoomBy } from './commands';
 import { findKey, step } from './visual/find';
 import { isMod, isSystemCombo } from './keys';
 
@@ -106,7 +106,11 @@ export function App() {
 
   useEffect(() => {
     void loadToolchain();
-    void loadSettings().then(() => initZoom(getState().settings?.uiZoom ?? 1));
+    void loadSettings();
+    // Ctrl+wheel / pinch must not scale the whole window; the visual editor zooms its page
+    const noWindowZoom = (e: WheelEvent) => { if (e.ctrlKey || e.metaKey) e.preventDefault(); };
+    window.addEventListener('wheel', noWindowZoom, { passive: false });
+    return () => window.removeEventListener('wheel', noWindowZoom);
   }, []);
   useEffect(() => api.onFlush(async () => { flushVisual(); await saveAll(); }), []);
 
