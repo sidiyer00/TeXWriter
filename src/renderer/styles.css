@@ -113,7 +113,7 @@ textarea.field { height: auto; padding: 7px 9px; resize: vertical; line-height: 
 .titlebar .center { flex: 1 1 200px; display: flex; justify-content: center; min-width: 0; }
 
 .body { flex: 1; min-height: 0; display: flex; }
-.panel-left { flex: none; width: 240px; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--rule); min-height: 0; }
+.panel-left { flex: none; width: 252px; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--rule); min-height: 0; }
 .panel-right { flex: none; width: 316px; display: flex; flex-direction: column; background: var(--chrome); border-left: 1px solid var(--rule); min-height: 0; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .statusbar { flex: none; display: flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; background: var(--panel); border-top: 1px solid var(--rule); overflow: hidden; }
@@ -164,8 +164,11 @@ button.sb:hover { background: var(--hover-2); color: var(--ink); }
 .ProseMirror h1 { font-size: 21px; }
 .ProseMirror h2 { font-size: 17px; }
 .ProseMirror h3 { font-size: 15px; }
-.ProseMirror h1[data-num]::before, .ProseMirror h2[data-num]::before, .ProseMirror h3[data-num]::before { content: attr(data-num); margin-right: 12px; }
-.ProseMirror h1[data-label]::after, .ProseMirror h2[data-label]::after, .ProseMirror h3[data-label]::after { content: attr(data-label); position: absolute; right: calc(100% + 10px); top: 4px; font-family: var(--mono); font-size: 10px; font-weight: 400; color: #A39B8F; white-space: nowrap; display: none; }
+/* \paragraph and \subparagraph: run-in-sized, unnumbered by default */
+.ProseMirror h4, .ProseMirror h5 { font-weight: 600; margin: 18px 0 6px; line-height: 1.35; position: relative; font-size: 14.5px; }
+.ProseMirror h5 { font-weight: 600; font-style: italic; margin-left: 18px; }
+.ProseMirror :is(h1, h2, h3, h4, h5)[data-num]::before { content: attr(data-num); margin-right: 12px; }
+.ProseMirror :is(h1, h2, h3, h4, h5)[data-label]::after { content: attr(data-label); position: absolute; right: calc(100% + 10px); top: 4px; font-family: var(--mono); font-size: 10px; font-weight: 400; color: #A39B8F; white-space: nowrap; display: none; }
 .ProseMirror ul, .ProseMirror ol { margin: 0 0 12px; padding-left: 26px; }
 .ProseMirror li p { margin: 0 0 4px; }
 .ProseMirror code { font-family: var(--mono); font-size: .86em; background: #F4F2EE; border-radius: 3px; padding: 0 3px; }
@@ -569,3 +572,18 @@ button.sb:hover { background: var(--hover-2); color: var(--ink); }
 .gen-log { max-height: 260px; overflow: auto; margin: 0; font-size: 11px; white-space: pre-wrap; }
 .gen-item { display: flex; align-items: center; gap: 2px; border-radius: 6px; }
 .gen-item:hover { background: rgba(0,0,0,.03); }
+.tb.tb-danger { color: var(--fail); }
+.tb.tb-danger:hover { background: #F8E5E1; }
+/* navigator tabs: the strip scrolls, the collapse button never leaves the panel */
+.nav-tabs { gap: 2px; }
+.nav-tabs-scroll { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.nav-tabs-scroll::-webkit-scrollbar { display: none; }
+.nav-tabs-scroll .tab { flex: none; padding: 0 7px; }
+.nav-collapse { flex: none; }
+.outline-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px 6px 4px; border: 0; background: none; cursor: pointer; font: inherit; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted-2); text-align: left; }
+.outline-head:first-child { padding-top: 0; }
+.outline-head .muted { margin-left: auto; font-weight: 400; letter-spacing: 0; }
+.tree.lof { min-height: 26px; font-size: 12.5px; padding-left: 22px; }
+.tree.lof .num { min-width: 30px; }
+.gen-item .gen-del { color: var(--muted-3); }
+.gen-item .gen-del:hover:not(:disabled) { color: var(--fail); }

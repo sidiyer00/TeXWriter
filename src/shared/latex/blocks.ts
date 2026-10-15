@@ -4,7 +4,7 @@
 // editor cannot represent faithfully becomes a `rawBlock` (or `inlineRaw`) that keeps
 // its exact source. Every top-level block remembers its original source and its
 // canonical serialization; on save, untouched blocks emit their original bytes.
-import { JNode, HEADING_COMMANDS, MATH_ENVS, PAGEBREAK_COMMANDS, FRIENDLY_COMMANDS, INLINE_COMMANDS } from './model';
+import { JNode, HEADING_COMMANDS, HEADING_BY_LEVEL, MATH_ENVS, PAGEBREAK_COMMANDS, FRIENDLY_COMMANDS, INLINE_COMMANDS } from './model';
 import { CommentInInline, parseInline, serializeInline, wrap } from './inline';
 import { parseTableBlock, serializeTableBlock } from './table';
 import { findEnvEnd, matchGroup, readArgs, readCommand, skipArgWs, skipInlineWs, lineOf } from './scan';
@@ -430,7 +430,9 @@ export function canonicalBlock(node: JNode, pad = ''): string {
     case 'paragraph':
       return wrap(serializeInline(node.content, true), 88);
     case 'heading': {
-      const cmd = a.cmd || (['section', 'section', 'subsection', 'subsubsection'][a.level ?? 1] ?? 'section');
+      // keep the command the source used (\chapter) unless the level was changed since
+      const lvl = a.level ?? 1;
+      const cmd = a.cmd && HEADING_COMMANDS[a.cmd] === lvl ? a.cmd : HEADING_BY_LEVEL[lvl] ?? 'section';
       const label = a.label ? `\\label{${a.label}}` : '';
       return `\\${cmd}${a.star ? '*' : ''}{${serializeInline(node.content)}}${label}`;
     }

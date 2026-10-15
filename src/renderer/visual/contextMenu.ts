@@ -1,6 +1,7 @@
 // Right-click menu for the visual editor. Electron adds spelling suggestions for the word
 // under the cursor (merged in by ContextMenu because the list starts with Cut/Copy/Paste).
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
+import { HEADING_STYLES, MAX_HEADING, headingLevel, setBlockStyle, shiftHeading } from './headings';
 import type { Editor } from '@tiptap/react';
 import { api, getState, gotoSource, mainFile, openContextMenu, setState, toast, type MenuItem } from '../store';
 import { insertLink, insertMenu, newComment, followAtCursor } from '../commands';
@@ -70,10 +71,10 @@ export function visualContextMenu(ed: Editor, e: MouseEvent) {
       { label: 'Highlight', submenu: [...HIGHLIGHTS.map((t) => ({ label: t.name, shortcut: t.hex === 'FFF176' ? 'Ctrl+Shift+H' : undefined, run: () => c().setHighlightColor(t.hex).run() })), { separator: true }, { label: 'No highlight', run: () => c().unsetHighlightColor().run() }] },
       { label: 'Clear formatting', disabled: sel.empty, run: () => c().unsetAllMarks().run() },
       { label: 'Paragraph style', submenu: [
-        { label: 'Body text', shortcut: 'Ctrl+Alt+0', checked: ed.isActive('paragraph'), run: () => c().setParagraph().run() },
-        { label: 'Section', shortcut: 'Ctrl+Alt+1', checked: ed.isActive('heading', { level: 1 }), run: () => c().setHeading({ level: 1 }).run() },
-        { label: 'Subsection', shortcut: 'Ctrl+Alt+2', checked: ed.isActive('heading', { level: 2 }), run: () => c().setHeading({ level: 2 }).run() },
-        { label: 'Subsubsection', shortcut: 'Ctrl+Alt+3', checked: ed.isActive('heading', { level: 3 }), run: () => c().setHeading({ level: 3 }).run() },
+        { label: 'Body text', shortcut: 'Ctrl+Alt+0', checked: ed.isActive('paragraph'), run: () => setBlockStyle(ed, 0) },
+        ...HEADING_STYLES.map((h) => ({ label: h.label, shortcut: `Ctrl+Alt+${h.level}`, checked: ed.isActive('heading', { level: h.level }), run: () => setBlockStyle(ed, h.level) })),
+        { label: 'Promote heading', shortcut: 'Alt+Shift+←', disabled: headingLevel(ed) <= 1, run: () => void shiftHeading(ed, -1) },
+        { label: 'Demote heading', shortcut: 'Alt+Shift+→', disabled: !headingLevel(ed) || headingLevel(ed) >= MAX_HEADING, run: () => void shiftHeading(ed, 1) },
         { separator: true },
         { label: 'Bulleted list', shortcut: 'Ctrl+Shift+8', checked: ed.isActive('bulletList'), run: () => c().toggleBulletList().run() },
         { label: 'Numbered list', shortcut: 'Ctrl+Shift+7', checked: ed.isActive('orderedList'), run: () => c().toggleOrderedList().run() },

@@ -1,5 +1,6 @@
 // Right panel: settings for whatever is selected in the visual editor.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { HEADING_STYLES } from '../visual/headings';
 import { MathInput, type MathInputHandle } from './MathInput';
 import { HEADER_FILLS, TABLE_SIZES, TABLE_SPACING, TABLE_STYLES } from '../../shared/latex/table';
 import { editorRef } from '../visual/editorRef';
@@ -378,7 +379,7 @@ export function Properties() {
       case 'heading':
         body = (
           <div className="sec">
-            <label className="f">Level<select className="field" value={a.level} onChange={(e) => setAttrs(sel.pos, { level: Number(e.target.value), cmd: null })}><option value={1}>Section</option><option value={2}>Subsection</option><option value={3}>Subsubsection</option></select></label>
+            <label className="f">Level<select className="field" value={a.level} onChange={(e) => setAttrs(sel.pos, { level: Number(e.target.value), cmd: null })}>{HEADING_STYLES.map((h) => <option key={h.level} value={h.level}>{h.label}</option>)}</select></label>
             <label className="chk"><input type="checkbox" checked={!a.star} onChange={(e) => setAttrs(sel.pos, { star: !e.target.checked })} />Numbered</label>
             <Debounced label="Label" mono value={a.label ?? ''} onCommit={(v) => setAttrs(sel.pos, { label: v.trim() })} placeholder="sec:name" />
             <RefCount label={a.label} />

@@ -29,6 +29,7 @@ const api: TeXWriterApi = {
   saveManifest: (root, m) => call('saveManifest', root, m),
   readText: (root, rel) => call('readText', root, rel),
   writeText: (root, rel, text) => call('writeText', root, rel, text),
+  removeGeneratedFile: (root, id) => call('removeGeneratedFile', root, id),
   readBinary: (root, rel) => call('readBinary', root, rel),
   importAsset: (root, abs, dest) => call('importAsset', root, abs, dest),
   fileUrl: (root, rel) => `texwriter-file://local/?root=${encodeURIComponent(root)}&path=${encodeURIComponent(rel)}`,

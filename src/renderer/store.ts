@@ -501,6 +501,33 @@ export async function unlinkBlock(id: string) {
   toast('Converted to ordinary LaTeX. It is no longer regenerated.');
 }
 
+/**
+ * Remove a generated table or figure: its block in the document, its manifest entry and the
+ * derived generated/<id>.tex. The script and the file it writes stay on disk.
+ */
+export async function deleteBlock(id: string, opts: { confirm?: boolean } = {}) {
+  const cfg = manifest().blocks[id];
+  if (opts.confirm !== false) {
+    const what = cfg ? `${cfg.kind === 'figure' ? 'figure' : 'table'} “${cfg.label || id}”` : `block “${id}”`;
+    const keep = cfg?.script ? ` ${cfg.script} is kept.` : cfg?.output ? ` ${cfg.output} is kept.` : '';
+    if (!window.confirm(`Delete the generated ${what} from the document?${keep}`)) return;
+  }
+  const doc = toDocJson(parsedMain());
+  const before = doc.content?.length ?? 0;
+  doc.content = (doc.content ?? []).filter((n) => !(n.type === 'generatedBlock' && n.attrs?.id === id));
+  if (doc.content.length !== before) writeMainDoc(doc);
+  if (cfg) {
+    const m = manifest();
+    delete m.blocks[id];
+    await saveManifest({ ...m });
+  }
+  setState((s) => { const renders = { ...s.renders }; delete renders[id]; return { renders }; });
+  await guard(() => api.removeGeneratedFile(root(), id));
+  await refreshFileList();
+  derive();
+  toast(cfg?.script ? `Deleted. ${cfg.script} is still in the project.` : 'Deleted.');
+}
+
 export async function restoreBlock(id: string) {
   const p = parsedMain();
   const doc = toDocJson(p);
