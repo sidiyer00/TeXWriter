@@ -132,7 +132,7 @@ export function CommentsPanel() {
             <span className="muted">Select text in the document and press Ctrl+Alt+M, or right-click → New comment. Comments are saved in texwriter-comments.json inside the project, so anyone you share the project with sees them.</span>
           </div>
         )}
-        {list.map((t) => <Thread key={t.id} t={t} active={t.id === active} located={!!ranges?.has(t.id) || t.resolved} />)}
+        {list.map((t) => <Thread key={t.id} t={t} active={t.id === active} located={!!ranges?.has(t.id)} />)}
       </div>
     </div>
   );

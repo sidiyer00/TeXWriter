@@ -67,22 +67,13 @@ export function numberDocument(doc: JNode, blocks: Record<string, GeneratedBlock
         sec[lvl]++;
         for (let k = lvl + 1; k < sec.length; k++) sec[k] = 0;
         if (lvl === 1) { eq = 0; tab = 0; fig = 0; }
-        // \paragraph and \subparagraph are unnumbered at LaTeX's default secnumdepth (3)
-        if (lvl <= 3) {
-          const top = appendix ? String.fromCharCode(64 + sec[1]) : String(sec[1]);
-          num = [top, ...sec.slice(2, lvl + 1)].join('.');
-        }
+        // every level is numbered (1.2.3.4.5): the preamble sets secnumdepth to 5
+        const top = appendix ? String.fromCharCode(64 + sec[1]) : String(sec[1]);
+        num = [top, ...sec.slice(2, lvl + 1)].join('.');
       }
       numbers.set(index, num);
       const title = plain(n.content);
-      // an unnumbered \paragraph refers to the enclosing numbered (sub)section, as in LaTeX
-      let refNum = num;
-      if (!num && !a.star && lvl > 3) {
-        const parts = [appendix ? String.fromCharCode(64 + sec[1]) : String(sec[1]), ...sec.slice(2, 4).map(String)];
-        while (parts.length > 1 && parts[parts.length - 1] === '0') parts.pop();
-        refNum = parts.join('.');
-      }
-      if (a.label) labels.set(a.label, { label: a.label, kind: 'section', number: refNum, title });
+      if (a.label) labels.set(a.label, { label: a.label, kind: 'section', number: num, title });
       if (lvl === 1 || outline.length === 0) outline.push({ index, level: lvl, number: num, title, label: a.label || undefined, children: [] });
       else outline.push({ index, level: lvl, number: num, title, label: a.label || undefined, children: [] });
       return;
@@ -135,6 +126,39 @@ export function numberDocument(doc: JNode, blocks: Record<string, GeneratedBlock
   });
   void secNum;
   return { labels, outline, numbers };
+}
+
+/**
+ * Page numbers from a compiled .toc / .lot / .lof file, keyed by the entry's number
+ * ("2.1", "A"). Lines look like \contentsline {table}{\numberline {2.1}{…}}{5}{table.2.1}%
+ * (the last group is hyperref's anchor; without hyperref the page comes last).
+ */
+export function parseContentsPages(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const isPage = (s: string) => /^[0-9]+$|^[ivxlcdm]+$/i.test(s.trim());
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/%\s*$/, '').trim();
+    const num = /^\\contentsline\s*\{\w+\*?\}\{\\numberline\s*\{([^{}]*)\}/.exec(line);
+    const tail = /(?:\{([^{}]*)\})?\{([^{}]*)\}$/.exec(line);
+    if (!num || !tail) continue;
+    const page = isPage(tail[2]) ? tail[2] : tail[1] ?? '';
+    if (isPage(page) && !(num[1] in out)) out[num[1].trim()] = page.trim();
+  }
+  return out;
+}
+
+export interface FloatEntry { index: number; num: string; caption: string; text: string; generated?: boolean }
+
+/** Every numbered table or figure with its caption as plain text, like \listoftables. */
+export function floatEntries(outline: OutlineItem[], labels: Map<string, LabelInfo>, kind: 'table' | 'figure'): FloatEntry[] {
+  return outline.flatMap((o) => o.children.filter((c) => c.kind === kind)).map((c) => {
+    const cap = c.label ? labels.get(c.label)?.title ?? '' : '';
+    return {
+      index: c.index, text: c.text, generated: c.generated,
+      num: c.text.replace(/^\S+\s+/, ''),
+      caption: cap.replace(/\\[a-zA-Z]+\*?(\[[^\]]*\])?\{([^}]*)\}/g, '$2').replace(/[{}$\\]/g, '').trim(),
+    };
+  });
 }
 
 export function refDisplay(cmd: string, info: LabelInfo | undefined): string {

@@ -5,7 +5,7 @@ import type {
   AppSettings, CommentThread, CompileResult, Diagnostic, GeneratedBlockConfig, OpenProject, ProjectManifest, SpellInfo, ToolchainInfo, ThemeSettings,
 } from '../shared/types';
 import { parseDocument, toDocJson, serializeDocument, blockLines, ParsedDocument } from '../shared/latex/blocks';
-import { parseBib, BibEntry, numberDocument, LabelInfo, OutlineItem } from '../shared/latex/refs';
+import { parseBib, BibEntry, numberDocument, LabelInfo, OutlineItem, parseContentsPages } from '../shared/latex/refs';
 import { renderGenerated, pendingTex, starterScript, type BlockView, type ScriptLanguage } from '../shared/generate';
 import { hash } from '../shared/latex/scan';
 import { closest } from '../shared/latex/log';
@@ -92,6 +92,10 @@ export interface State {
   picker: 'cite' | 'ref' | null;
   /** bumps when the visual editor instance changes */
   editorTick: number;
+  /** page numbers from the last compile's .toc/.lot/.lof, keyed by section/table/figure number */
+  pageNums: { toc: Record<string, string>; table: Record<string, string>; figure: Record<string, string> } | null;
+  /** zoom of the visual editor's page (Ctrl+= / Ctrl+- / Ctrl+wheel); the rest of the window keeps its size */
+  sheetZoom: number;
 }
 
 export interface MenuItem {
@@ -111,7 +115,8 @@ const initial: State = {
   bib: [], labels: new Map(), outline: [], numbers: new Map(), renders: {}, externalChange: null, toast: null,
   reviewPage: 1, reviewIssue: null, jump: null, pdfJump: null, insertAfter: null,
   settings: null, openTabs: [], panel: { open: false, tab: 'properties' }, find: null, comments: [], activeComment: null, draftComment: null,
-  contextMenu: null, spell: null, quickOpen: false, equationModal: null, dialog: null, generatedInit: null, prompt: null, picker: null, editorTick: 0,
+  contextMenu: null, spell: null, quickOpen: false, equationModal: null, dialog: null, generatedInit: null, prompt: null, picker: null, editorTick: 0, pageNums: null,
+  sheetZoom: (() => { try { const z = Number(localStorage.getItem('texwriter.sheetZoom')); return z >= 0.5 && z <= 3 ? z : 1; } catch { return 1; } })(),
 };
 
 let state: State = initial;
@@ -298,6 +303,16 @@ export async function openProject(rootDir: string) {
     setState((s) => ({ generating: s.generating && s.generating.id === e.id ? { ...s.generating, log: [...s.generating.log.slice(-300), e.line] } : s.generating }));
   }));
   if (p.state.lastCompile) setState({ lastCompile: { ...p.state.lastCompile, log: '' } as CompileResult });
+  void loadPageNumbers();
+}
+
+/** Read the page numbers LaTeX wrote for the contents and the lists of tables and figures. */
+export async function loadPageNumbers() {
+  if (!state.project) return;
+  const stem = `.texwriter/build/${mainFile().replace(/\.tex$/, '')}`;
+  const read = (ext: string) => api.readText(root(), `${stem}.${ext}`).then(parseContentsPages, () => ({}));
+  const [toc, table, figure] = await Promise.all([read('toc'), read('lot'), read('lof')]);
+  setState({ pageNums: { toc, table, figure } });
 }
 
 export function closeProject() {
@@ -419,15 +434,30 @@ export async function renderAllBlocks() {
   }
 }
 
+/** Read a script-less block's file again (a CSV kept up to date elsewhere) and rebuild its LaTeX. */
+async function rereadOutput(id: string, opts: { quiet?: boolean; batch?: { done: number; total: number } }): Promise<boolean> {
+  const cfg = manifest().blocks[id];
+  await saveAll();
+  setState({ generating: { id, done: opts.batch?.done ?? 0, total: opts.batch?.total ?? 1, log: [`Reading ${cfg.output}…`] } });
+  const ok = await refreshBlock(id, false);
+  if (ok) { const m = manifest(); m.blocks[id] = { ...m.blocks[id], refreshedAt: new Date().toISOString() }; }
+  await saveManifest({ ...manifest() });
+  if (!opts.batch) setState({ generating: null });
+  if (!ok && !opts.quiet) toast(`${cfg.label || id}: ${state.renders[id]?.message ?? `could not read ${cfg.output}`}`, 'err', { label: 'Show', run: () => showBlock(id) });
+  return ok;
+}
+
 /**
  * Run the script paired with a block, then rebuild the block from what it wrote. Open files
- * are saved first, so an edited script runs as shown.
+ * are saved first, so an edited script runs as shown. A block without a script is rebuilt
+ * from its file as it is now.
  */
 export async function runGenerator(id: string, opts: { quiet?: boolean; batch?: { done: number; total: number } } = {}): Promise<boolean> {
   if (!state.project) return false;
   const cfg = manifest().blocks[id];
-  if (!cfg?.script) { toast('This block has no script. Choose one in its properties.', 'err'); return false; }
   if (state.generating && !opts.batch) return false;
+  if (!cfg?.script && cfg?.output) return rereadOutput(id, opts);
+  if (!cfg?.script) { toast('This block has no script or file. Choose one in its properties.', 'err'); return false; }
   await saveAll();
   setState({ generating: { id, done: opts.batch?.done ?? 0, total: opts.batch?.total ?? 1, log: [] } });
   const run = await guard(() => api.runGenerator(root(), id), 'Could not run the script');
@@ -444,13 +474,13 @@ export async function runGenerator(id: string, opts: { quiet?: boolean; batch?: 
 
 let stopAll = false;
 
-/** Run every block that has a script, one after another. */
+/** Run every block's script, one after another; blocks built straight from a file re-read it. */
 export async function runAllGenerators(opts: { quiet?: boolean } = {}): Promise<{ ok: number; failed: number }> {
   const res = { ok: 0, failed: 0 };
   if (!state.project || state.generating) return res;
-  const ids = Object.values(manifest().blocks).filter((b) => b.script).map((b) => b.id);
+  const ids = Object.values(manifest().blocks).filter((b) => b.script || b.output).map((b) => b.id);
   if (!ids.length) {
-    if (!opts.quiet) toast('No generated tables or figures have a script yet. Add one with Insert → Generated table or Generated figure.');
+    if (!opts.quiet) toast('No generated tables or figures have a script or data file yet. Add one with Insert → Generated table or Generated figure.');
     return res;
   }
   stopAll = false;
@@ -459,8 +489,8 @@ export async function runAllGenerators(opts: { quiet?: boolean } = {}): Promise<
   }
   setState({ generating: null });
   if (!opts.quiet) {
-    if (res.failed) toast(`${res.failed} of ${ids.length} scripts failed. The Generated tab shows which, with their output.`, 'err', { label: 'Show', run: () => setState({ navOpen: true, navTab: 'generated' }) });
-    else toast(`Ran ${res.ok} script${res.ok === 1 ? '' : 's'}; the generated tables and figures are up to date.`, 'ok');
+    if (res.failed) toast(`${res.failed} of ${ids.length} generated tables and figures failed. The Generated tab shows which, with their output.`, 'err', { label: 'Show', run: () => setState({ navOpen: true, navTab: 'generated' }) });
+    else toast(`All ${res.ok} generated tables and figures are up to date.`, 'ok');
   }
   return res;
 }
@@ -597,6 +627,7 @@ export async function compileNow() {
   const result = await guard(() => api.compile(root()), 'Compile failed to start');
   setState((s) => ({ compiling: null, lastCompile: result ?? s.lastCompile, pdfVersion: s.pdfVersion + 1 }));
   if (!result) return;
+  void loadPageNumbers();
   const issues = allDiagnostics();
   if (!result.ok) toast(`Compile failed: ${issues.find((d) => d.severity === 'error')?.message ?? 'see diagnostics'}`, 'err', state.view !== 'review' ? { label: 'Show issues', run: () => setState({ view: 'review' }) } : undefined);
   else if (issues.length && state.view !== 'review') toast(`Compiled ${result.pages ?? ''} pages with ${issues.length} issue${issues.length > 1 ? 's' : ''}.`, undefined, { label: 'Review', run: () => setState({ view: 'review' }) });
@@ -689,7 +720,7 @@ async function migrateSupportMacros() {
 
 /** Main file emits \texwriterhl / \multirow but has no TeXWriter preamble: add a small support block. */
 export function ensureSupportInMain(tex: string): string {
-  if (!/\\texwriterhl\{|\\multirow\{|\\qnum\[/.test(tex)) return tex;
+  if (!/\\texwriterhl\{|\\multirow\{|\\qnum\[|\\texwriterindent\{|\\texwriterlistoftablesandfigures\b/.test(tex)) return tex;
   const pre = state.project?.files.some((f) => f.path === 'preamble.tex') && /\\input\{preamble(\.tex)?\}/.test(tex);
   if (pre || /(texwriter|quire):support begin/.test(tex) || /\\(newcommand|providecommand)\{?\\texwriterhl/.test(tex)) return tex;
   const at = tex.search(/\\begin\{document\}/);

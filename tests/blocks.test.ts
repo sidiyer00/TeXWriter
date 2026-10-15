@@ -167,3 +167,32 @@ Body.
     expect(serializeDocument(p.prefix, doc, p.suffix, p.leading).tex).toContain('\\begin{quirecallout}{Finding}');
   });
 });
+
+describe('indented body text', () => {
+  const DOC = String.raw`\documentclass{article}
+\begin{document}
+
+Plain paragraph.
+
+\texwriterindent{2} Indented \textbf{twice}.
+
+\end{document}
+`;
+
+  it('parses \\texwriterindent{N} as a paragraph with an indent level and round-trips', () => {
+    const p = parseDocument(DOC);
+    const doc = toDocJson(p);
+    const par = doc.content!.find((n) => n.attrs?.indent);
+    expect(par?.type).toBe('paragraph');
+    expect(par?.attrs?.indent).toBe(2);
+    expect(serializeDocument(p.prefix, doc, p.suffix, p.leading).tex).toBe(DOC);
+  });
+
+  it('writes the indent when a paragraph is indented in the editor', () => {
+    const p = parseDocument(DOC);
+    const doc = toDocJson(p);
+    const first = doc.content!.find((n) => n.type === 'paragraph')!;
+    first.attrs = { ...first.attrs, indent: 1 };
+    expect(serializeDocument(p.prefix, doc, p.suffix, p.leading).tex).toContain('\\texwriterindent{1} Plain paragraph.');
+  });
+});

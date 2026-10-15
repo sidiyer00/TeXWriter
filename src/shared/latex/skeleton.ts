@@ -5,7 +5,7 @@ import type { JNode } from './model';
 import { matchGroup } from './scan';
 
 /** Raw blocks that are structure, not content (title, contents, appendix, bibliography…). */
-const STRUCTURE = /^\\(maketitle|tableofcontents|listoffigures|listoftables|appendix|frontmatter|mainmatter|backmatter|bibliography|bibliographystyle|printbibliography|addbibresource|clearpage|cleardoublepage|newpage|onecolumn|twocolumn)\b/;
+const STRUCTURE = /^\\(maketitle|tableofcontents|listoffigures|listoftables|texwriterlistoftablesandfigures|appendix|frontmatter|mainmatter|backmatter|bibliography|bibliographystyle|printbibliography|addbibresource|clearpage|cleardoublepage|newpage|onecolumn|twocolumn)\b/;
 const KEEP_ENVS = /^\\begin\{(abstract|titlepage|keywords|IEEEkeywords|acknowledgements?)\}/;
 
 const fresh = (n: JNode): JNode => ({ ...n, attrs: { ...(n.attrs ?? {}), src: null, sig: null, gap: '\n\n' } });

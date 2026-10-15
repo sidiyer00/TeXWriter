@@ -11,7 +11,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import katex from 'katex';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import type { TableView } from '../../shared/generate';
-import { numberDocument, refDisplay, shortAuthor } from '../../shared/latex/refs';
+import { floatEntries, numberDocument, refDisplay, shortAuthor } from '../../shared/latex/refs';
 import type { JNode } from '../../shared/latex/model';
 import { getState, useStore, gotoSource, mainFile, mainBlockLines, api, setState, openTab, runGenerator, showBlock, unlinkBlock, deleteBlock } from '../store';
 import { Refresh, Link, Trash } from '../components/Icons';
@@ -38,6 +38,63 @@ export const BlockMeta = Extension.create({
         gap: { default: '\n\n', rendered: false, keepOnSplit: false },
       },
     }];
+  },
+});
+
+// ---------------------------------------------------------------- paragraph indent
+
+export const MAX_INDENT = 6;
+
+/**
+ * Tab / Shift+Tab indent and outdent body text, as in a word processor (lists and table
+ * cells keep their own Tab handling, which runs first). Tab never leaves the editor.
+ */
+export const ParagraphIndent = Extension.create({
+  name: 'paragraphIndent',
+  priority: 50,
+  addGlobalAttributes() {
+    return [{
+      types: ['paragraph'],
+      attributes: {
+        indent: {
+          default: 0,
+          keepOnSplit: true,
+          parseHTML: (el) => Math.min(MAX_INDENT, Number((el as HTMLElement).dataset.indent) || 0),
+          renderHTML: (a) => (a.indent ? { 'data-indent': a.indent, style: `--indent: ${a.indent}` } : {}),
+        },
+      },
+    }];
+  },
+  addKeyboardShortcuts() {
+    const shift = (delta: 1 | -1) => {
+      const { state, view } = this.editor;
+      const { $from, from, to } = state.selection;
+      if ($from.parent.type.name === 'codeBlock') {
+        if (delta === 1) view.dispatch(state.tr.insertText('    ', from, to));
+        return true;
+      }
+      const tr = state.tr;
+      state.doc.nodesBetween(from, to, (n, pos, parent) => {
+        if (n.type.name !== 'paragraph' || parent !== state.doc) return n.type.name !== 'paragraph';
+        const next = Math.max(0, Math.min(MAX_INDENT, (n.attrs.indent ?? 0) + delta));
+        if (next !== n.attrs.indent) tr.setNodeMarkup(pos, undefined, { ...n.attrs, indent: next });
+        return false;
+      });
+      if (tr.docChanged) view.dispatch(tr);
+      return true;
+    };
+    return {
+      Tab: () => shift(1),
+      'Shift-Tab': () => shift(-1),
+      // Backspace at the start of an indented paragraph outdents it first
+      Backspace: () => {
+        const { state, view } = this.editor;
+        const { $from, empty } = state.selection;
+        if (!empty || $from.parentOffset !== 0 || $from.depth !== 1 || $from.parent.type.name !== 'paragraph' || !$from.parent.attrs.indent) return false;
+        view.dispatch(state.tr.setNodeMarkup($from.before(1), undefined, { ...$from.parent.attrs, indent: $from.parent.attrs.indent - 1 }));
+        return true;
+      },
+    };
   },
 });
 
@@ -290,7 +347,7 @@ function GeneratedBlockView(props: ReactNodeViewProps) {
   const st = render?.status ?? 'pending';
   const running = gen?.id === id;
   const from = cfg.script ?? cfg.output ?? 'no source';
-  const tag = running ? `Running ${cfg.script}…`
+  const tag = running ? (cfg.script ? `Running ${cfg.script}…` : `Reading ${cfg.output}…`)
     : st === 'fresh' ? `Generated · ${from} · ${ago(cfg.lastRun?.at ?? cfg.refreshedAt)}`
     : st === 'pending' ? `Not generated yet · ${from}`
     : st === 'failed' ? `Last run failed · ${cfg.script}`
@@ -306,14 +363,14 @@ function GeneratedBlockView(props: ReactNodeViewProps) {
       {running ? <span className="mono small">{gen?.log[gen.log.length - 1] ?? 'Starting…'}</span>
         : st === 'pending' ? <>{cfg.script ? <>Run <span className="mono">{cfg.script}</span> to {what}.</> : <>Waiting for <span className="mono">{cfg.output}</span>.</>}</>
         : render?.message}
-      {cfg.script && !running && st !== 'conflict' && <div style={{ marginTop: 8 }}><button className="btn btn-sm btn-pri" onClick={run} disabled={!!gen}><Refresh />Run {cfg.script.split('/').pop()}</button></div>}
+      {from !== 'no source' && !running && st !== 'conflict' && <div style={{ marginTop: 8 }}><button className="btn btn-sm btn-pri" onClick={run} disabled={!!gen}><Refresh />{cfg.script ? 'Run' : 'Read'} {from.split('/').pop()}</button></div>}
     </div>
   );
   return (
     <NodeViewWrapper className={`blk blk-gen ${st}`} data-drag-handle="">
       <span className="blk-tag"><Link size={11} />{tag}</span>
       <div className="blk-actions" contentEditable={false}>
-        {cfg.script && <button className="tb" disabled={!!gen} onClick={run}><Refresh />{running ? 'Running…' : 'Run'}</button>}
+        {(cfg.script || cfg.output) && <button className="tb" disabled={!!gen} onClick={run} title={cfg.script ? `Run ${cfg.script}` : `Read ${cfg.output} again and rebuild the table`}><Refresh />{running ? 'Running…' : 'Run'}</button>}
         {cfg.script && <button className="tb" onClick={(e) => { stop(e); void openTab(cfg.script!); }}>Edit script</button>}
         {!cfg.script && cfg.output && cfg.kind === 'table' && <button className="tb" onClick={(e) => { stop(e); void openTab(cfg.output!); }}>Open data</button>}
         <button className="tb" onClick={props_}>Properties</button>
@@ -343,16 +400,66 @@ function GeneratedBlockView(props: ReactNodeViewProps) {
 
 // ---------------------------------------------------------------- raw / misc
 
+type ListKind = 'toc' | 'table' | 'figure' | 'floats';
+export const LIST_OF_FLOATS = '\\texwriterlistoftablesandfigures';
+const LISTS: Record<string, { title: string; kind: ListKind }> = {
+  '\\tableofcontents': { title: 'Contents', kind: 'toc' },
+  '\\listoftables': { title: 'List of Tables', kind: 'table' },
+  '\\listoffigures': { title: 'List of Figures', kind: 'figure' },
+  [LIST_OF_FLOATS]: { title: 'List of Tables and Figures', kind: 'floats' },
+};
+
+interface ListRow { index: number; label: string; text: string; page?: string; level: number }
+
+/**
+ * \tableofcontents and the lists of tables and figures: a preview of what LaTeX prints,
+ * with dot leaders and the page numbers of the last compile.
+ */
+function ListBlockView({ kind, title }: { kind: ListKind; title: string }) {
+  const outline = useStore((s) => s.outline);
+  const labels = useStore((s) => s.labels);
+  const pages = useStore((s) => s.pageNums);
+  const floats = (k: 'table' | 'figure'): ListRow[] => floatEntries(outline, labels, k).map((f) => ({
+    index: f.index, label: `${k === 'table' ? 'Table' : 'Figure'} ${f.num}.`, text: f.caption || '(no caption)', page: pages?.[k][f.num], level: 0,
+  }));
+  const groups: ListRow[][] = kind === 'toc'
+    ? [outline.filter((o) => o.number && o.level <= 3).map((o) => ({ index: o.index, label: o.number, text: o.title || '(untitled)', page: pages?.toc[o.number], level: o.level }))]
+    : kind === 'floats' ? [floats('table'), floats('figure')] : [floats(kind)];
+  const empty = groups.every((g) => g.length === 0);
+  const compiled = !!pages && Object.values(pages).some((p) => Object.keys(p).length > 0);
+  const go = (index: number) => (e: React.MouseEvent) => { e.stopPropagation(); void import('../components/Navigator').then((m) => m.goToBlock(index)); };
+  const what = kind === 'toc' ? 'headings' : kind === 'floats' ? 'tables or figures' : `${kind}s`;
+  return (
+    <NodeViewWrapper className="blk blk-list" data-drag-handle="">
+      <span className="blk-tag">{title}{compiled ? ' · page numbers from the last compile' : ' · compile for page numbers'}</span>
+      <div className="lst-title">{title}</div>
+      {empty
+        ? <div className="lst-empty">No numbered {what} yet. They are listed here as you add them.</div>
+        : groups.filter((g) => g.length).map((g, k) => (
+          <div key={k} className="lst-group">
+            {g.map((r) => (
+              <button key={r.index} className={`lst-row lvl${Math.min(r.level, 5)}`} contentEditable={false} onClick={go(r.index)} title="Go there">
+                <span className="lst-num">{r.label}</span>
+                <span className="lst-text">{r.text}</span>
+                <span className="lst-dots" aria-hidden="true" />
+                <span className="lst-page">{r.page ?? '–'}</span>
+              </button>
+            ))}
+          </div>
+        ))}
+    </NodeViewWrapper>
+  );
+}
+
 function RawBlockView(props: ReactNodeViewProps) {
   const a = props.node.attrs;
   const latex: string = a.latex ?? '';
   const label: string = a.label || 'LaTeX';
   const one = latex.trim();
+  if (LISTS[one]) return <ListBlockView {...LISTS[one]} />;
   const friendly: Record<string, string> = {
-    '\\tableofcontents': 'Table of contents — generated when the PDF is compiled',
     '\\maketitle': 'Title block — from \\title, \\author and \\date in the preamble',
     '\\appendix': 'Appendices start here — following sections are lettered',
-    '\\listoftables': 'List of tables', '\\listoffigures': 'List of figures',
   };
   if (friendly[one] || /^\\bibliography(style)?\{/.test(one) || /^\\printbibliography/.test(one)) {
     const text = friendly[one] ?? (/style/.test(one) ? `Bibliography style: ${/\{([^}]*)\}/.exec(one)?.[1]}` : 'Bibliography — references cited in the text are listed here');
@@ -549,6 +656,7 @@ export function extensions() {
     TextColor, TeXWriterHighlight,
     TableBlock, QTable, QTableRow, QTableHeader, QTableCell,
     BlockMeta,
+    ParagraphIndent,
     Numbering,
     Find,
     Comments,

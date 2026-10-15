@@ -52,9 +52,9 @@ describe('five heading levels', () => {
     expect(tex).not.toContain('\\paragraph{Sample}');
   });
 
-  it('numbers levels 1–3 and leaves paragraph headings unnumbered, referring to the enclosing section', () => {
+  it('numbers all five levels, 1.1.1.1.1 style', () => {
     const { outline, labels } = numberDocument(toDocJson(parseDocument(DOC)));
-    expect(outline.map((o) => o.number)).toEqual(['1', '1.1', '1.1.1', '', '']);
-    expect(labels.get('par:sample')?.number).toBe('1.1.1');
+    expect(outline.map((o) => o.number)).toEqual(['1', '1.1', '1.1.1', '1.1.1.1', '1.1.1.1.1']);
+    expect(labels.get('par:sample')?.number).toBe('1.1.1.1');
   });
 });

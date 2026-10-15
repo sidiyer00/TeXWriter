@@ -6,6 +6,7 @@ import { extensions, numberingKey, syncKey } from './nodes';
 import { editorRef } from './editorRef';
 import { getState, mainFile, parsedMain, setFileText, setFlushHook, setState, subscribe, useStore } from '../store';
 import { commentsKey } from './comments';
+import { setZoom } from '../commands';
 import { visualContextMenu } from './contextMenu';
 import { serializeDocument, toDocJson, parseDocument } from '../../shared/latex/blocks';
 import { lineOf } from '../../shared/latex/scan';
@@ -177,6 +178,29 @@ export function VisualEditor() {
     (ed.view.nodeDOM(pos) as HTMLElement | null)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
   }, [focus?.nonce]);
 
+  // Ctrl+wheel (and trackpad pinch, which arrives as Ctrl+wheel) zooms the page only,
+  // keeping the point under the pointer where it is
+  const zoom = useStore((s) => s.sheetZoom);
+  const canvas = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = canvas.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const old = getState().sheetZoom;
+      const d = Math.max(-50, Math.min(50, e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY));
+      setZoom(old * Math.exp(-d / 400));
+      const next = getState().sheetZoom;
+      if (next === old) return;
+      const r = el.getBoundingClientRect();
+      const x = el.scrollLeft + e.clientX - r.left, y = el.scrollTop + e.clientY - r.top;
+      requestAnimationFrame(() => el.scrollBy({ left: x * (next / old - 1), top: y * (next / old - 1) }));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [hasDoc]);
+
   const theme = useStore((s) => s.project?.manifest.theme);
   if (!hasDoc) {
     return (
@@ -192,13 +216,13 @@ export function VisualEditor() {
     );
   }
   return (
-    <div className="doc-canvas" onMouseDown={(e) => { if (e.target === e.currentTarget) editor?.commands.focus('end'); }}
+    <div className="doc-canvas" ref={canvas} onMouseDown={(e) => { if (e.target === e.currentTarget) editor?.commands.focus('end'); }}
       onContextMenu={(e) => {
         if (!editor || !(e.target as HTMLElement).closest('.ProseMirror')) return;
         if ((e.target as HTMLElement).closest('input, textarea, select, .blk-actions')) return;
         visualContextMenu(editor, e.nativeEvent);
       }}>
-      <article className="page">
+      <article className="page" style={zoom !== 1 ? { zoom } : undefined}>
         <div className="page-head" aria-hidden="true"><span>{theme?.headerLeft || project?.manifest.name}</span><span>{theme?.headerRight}</span></div>
         <EditorContent editor={editor} />
       </article>

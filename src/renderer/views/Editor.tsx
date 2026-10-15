@@ -10,6 +10,7 @@ import { FindBar } from '../components/FindBar';
 import { CompileButton, ExportMenu, RunAllButton, StatusBar, TitleBar } from '../components/Chrome';
 import { api, closeTab, getState, guard, mainFile, openContextMenu, openFile, resolveExternal, restoreBlock, setState, unlinkBlock, useStore } from '../store';
 import { Gear, Panel, X } from '../components/Icons';
+import { setZoom } from '../commands';
 
 function ModeSwitch() {
   const mode = useStore((s) => s.mode);
@@ -108,6 +109,7 @@ export function EditorScreen() {
   const navOpen = useStore((s) => s.navOpen);
   const ext = useStore((s) => s.externalChange);
   const sourceLine = useStore((s) => s.sourceLine);
+  const zoom = useStore((s) => s.sheetZoom);
   const project = useStore((s) => s.project)!;
   return (
     <>
@@ -141,6 +143,7 @@ export function EditorScreen() {
       </div>
       <StatusBar>
         {sourceLine && mode !== 'visual' && <span className="sb">Ln {sourceLine}</span>}
+        {mode !== 'source' && <button className="sb" title="Page zoom: Ctrl+= / Ctrl+- or Ctrl+wheel. Click to reset." onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>}
         <span className="sb">{project.manifest.engine}</span>
       </StatusBar>
     </>

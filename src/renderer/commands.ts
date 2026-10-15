@@ -20,11 +20,12 @@ export const SHORTCUTS: { group: string; items: Shortcut[] }[] = [
     { keys: 'Ctrl+S', action: 'Save all files (autosave is also on)' },
     { keys: 'Ctrl+O', action: 'Open a file in the project' },
     { keys: 'Ctrl+Enter', action: 'Compile the PDF' },
-    { keys: 'Ctrl+Shift+G', action: 'Run the scripts of all generated tables and figures' },
+    { keys: 'Ctrl+Shift+G', action: 'Update all generated tables and figures (run scripts, re-read data files)' },
     { keys: 'Ctrl+,', action: 'Settings' },
     { keys: 'F1', action: 'Keyboard shortcuts' },
     { keys: 'F8 / Shift+F8', action: 'Next / previous compile issue' },
-    { keys: 'Ctrl+= / Ctrl+- / Ctrl+0', action: 'Zoom in / out / reset' },
+    { keys: 'Ctrl+= / Ctrl+- / Ctrl+0', action: 'Zoom the page in / out / reset' },
+    { keys: 'Ctrl+wheel / pinch', action: 'Zoom the page' },
   ] },
   { group: 'View', items: [
     { keys: 'Ctrl+1 / 2 / 3', action: 'Visual / Split / LaTeX mode' },
@@ -48,11 +49,11 @@ export const SHORTCUTS: { group: string; items: Shortcut[] }[] = [
     { keys: 'Ctrl+E', action: 'Monospace' },
     { keys: 'Ctrl+Shift+H', action: 'Highlight' },
     { keys: 'Ctrl+Alt+0', action: 'Body text' },
-    { keys: 'Ctrl+Alt+1 … 5', action: 'Section / subsection / subsubsection / paragraph / subparagraph heading' },
+    { keys: 'Ctrl+Alt+1 … 5', action: 'Heading 1 … Heading 5' },
     { keys: 'Alt+Shift+← / →', action: 'Promote / demote heading' },
     { keys: 'Ctrl+Shift+8', action: 'Bulleted list' },
     { keys: 'Ctrl+Shift+7', action: 'Numbered list' },
-    { keys: 'Tab / Shift+Tab', action: 'Indent / outdent list item; next / previous table cell' },
+    { keys: 'Tab / Shift+Tab', action: 'Indent / outdent body text or list item; next / previous table cell' },
     { keys: 'Shift+Enter', action: 'Line break' },
   ] },
   { group: 'Insert', items: [
@@ -213,10 +214,16 @@ export function nextIssue(dir: 1 | -1) {
   gotoSource(next.file, next.line);
 }
 
-let zoom = 1;
-export function setZoom(f: number) { zoom = Math.min(2, Math.max(0.6, Math.round(f * 10) / 10)); void api.setZoom(zoom); }
-export function initZoom(f: number) { zoom = f || 1; }
-export function zoomBy(d: number) { setZoom(zoom + d); }
+const ZOOM_KEY = 'texwriter.sheetZoom'; // read back in store.ts
+export const MIN_ZOOM = 0.5, MAX_ZOOM = 3;
+/** Zoom the page in the visual editor only (the window's UI scale is in Settings). */
+export function setZoom(f: number) {
+  const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(f * 100) / 100));
+  setState({ sheetZoom: z });
+  try { localStorage.setItem(ZOOM_KEY, String(z)); } catch { /* storage unavailable */ }
+}
+/** Keyboard steps land on multiples of 10 %. */
+export function zoomBy(d: number) { setZoom(Math.round((getState().sheetZoom + d) * 10) / 10); }
 
 export const fileMenu = (): MenuItem[] => {
   const p = !!getState().project;
@@ -279,7 +286,7 @@ export const viewMenu = (): MenuItem[] => {
     { separator: true },
     { label: 'Zoom in', shortcut: 'Ctrl+=', run: () => zoomBy(0.1) },
     { label: 'Zoom out', shortcut: 'Ctrl+-', run: () => zoomBy(-0.1) },
-    { label: 'Reset zoom', shortcut: 'Ctrl+0', run: () => setZoom(1) },
+    { label: `Reset zoom (${Math.round(s.sheetZoom * 100)}%)`, shortcut: 'Ctrl+0', run: () => setZoom(1) },
   ];
 };
 
@@ -287,7 +294,7 @@ export const runMenu = (): MenuItem[] => {
   const p = !!getState().project;
   return [
     { label: 'Compile', shortcut: 'Ctrl+Enter', disabled: !p, run: () => void compileNow() },
-    { label: 'Run all scripts', shortcut: 'Ctrl+Shift+G', disabled: !p, run: () => void runAllGenerators() },
+    { label: 'Run all generated', shortcut: 'Ctrl+Shift+G', disabled: !p, run: () => void runAllGenerators() },
     { separator: true },
     { label: 'Next issue', shortcut: 'F8', disabled: !p, run: () => nextIssue(1) },
     { label: 'Previous issue', shortcut: 'Shift+F8', disabled: !p, run: () => nextIssue(-1) },
@@ -319,6 +326,16 @@ export async function insertFigure() {
   setState((s) => ({ project: s.project ? { ...s.project, files: pr.files } : s.project }));
 }
 
+/** \tableofcontents, \listoftables or \listoffigures at the cursor (once per document). */
+export function insertList(cmd: string) {
+  const ed = editorRef.current;
+  if (!ed) return;
+  let exists = false;
+  ed.state.doc.forEach((n) => { if (n.type.name === 'rawBlock' && String(n.attrs.latex).trim() === cmd) exists = true; });
+  if (exists) { toast('The document already has this list.'); return; }
+  insertBlock(ed, { type: 'rawBlock', attrs: { latex: cmd, label: 'LaTeX' } });
+}
+
 export const insertMenu = (): MenuItem[] => {
   const ed = () => editorRef.current;
   const ok = !!editorRef.current && getState().view === 'editor' && getState().mode !== 'source';
@@ -340,6 +357,8 @@ export const insertMenu = (): MenuItem[] => {
     { label: 'Code block', disabled: !ok, run: () => { const e = ed(); if (e) insertBlock(e, { type: 'codeBlock', attrs: { language: 'Python' }, content: [{ type: 'text', text: '# code' }] }); } },
     { label: 'Callout', disabled: !ok, run: () => { const e = ed(); if (e) insertBlock(e, { type: 'calloutBlock', attrs: { title: 'Finding F-0X · Severity: Medium' }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Describe the finding.' }] }] }); } },
     { label: 'Page break', disabled: !ok, run: () => { const e = ed(); if (e) insertBlock(e, { type: 'pageBreak', attrs: { cmd: 'clearpage' } }); } },
+    { label: 'Table of contents', disabled: !ok, run: () => insertList('\\tableofcontents') },
+    { label: 'List of tables and figures', disabled: !ok, run: () => insertList('\\texwriterlistoftablesandfigures') },
     { label: 'Raw LaTeX block', disabled: !ok, run: () => { const e = ed(); if (e) insertBlock(e, { type: 'rawBlock', attrs: { label: 'LaTeX', latex: '% your LaTeX here' } }); } },
   ];
 };

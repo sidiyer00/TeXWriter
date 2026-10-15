@@ -200,7 +200,7 @@ export function FormatToolbar() {
     { id: 'fig', group: 'ins', priority: 4, node: btn('fig', 'Figure', 'Insert figure', () => void insertFigure()), menu: { label: 'Figure…', run: () => void insertFigure() } },
     { id: 'cmt', group: 'ins', priority: 4, node: btn('cmt', 'Comment', 'New comment on the selection  Ctrl+Alt+M', newComment), menu: { label: 'Comment', shortcut: 'Ctrl+Alt+M', run: newComment } },
   ];
-  const extra = insertMenu().filter((m) => m.label && ['Footnote', 'Code block', 'Callout', 'Page break', 'Raw LaTeX block', 'Test result…'].includes(m.label));
+  const extra = insertMenu().filter((m) => m.label && ['Footnote', 'Code block', 'Callout', 'Page break', 'Table of contents', 'List of tables and figures', 'Raw LaTeX block', 'Test result…'].includes(m.label));
   return (
     <div className="toolbar-stack">
       {/* once the panel is open its own tabs take over; these come back when it is closed */}
