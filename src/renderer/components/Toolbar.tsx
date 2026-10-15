@@ -6,10 +6,11 @@ import { getState, promptText, setState, toast, togglePanel, useStore, mainFile,
 import { insertEquation, insertFigure, insertInlineMath, insertLink, newComment, insertMenu } from '../commands';
 import { MenuList, below, type Anchor } from './Menu';
 import { useOutside } from './Chrome';
-import { Down, List, OList } from './Icons';
+import { Down, Indent, List, Menu as MenuIcon, OList, Outdent } from './Icons';
 import { HIGHLIGHTS, TEXT_COLORS, cssColor } from '../visual/marks';
 import { applyNumberFormat, columnAlignAt, currentNumber, selectColumnOrRow, setCellValue, setColumnAlign, setTableBlockAttrs, tableBlockAt, currentColumns, addHeaderLevel } from '../visual/table';
 import { copyTableForSpreadsheet } from '../visual/clipboard';
+import { HEADING_STYLES, MAX_HEADING, headingLevel, setBlockStyle, shiftHeading } from '../visual/headings';
 import { HEADER_FILLS, TABLE_SIZES, TABLE_SPACING, TABLE_STYLES } from '../../shared/latex/table';
 import { NUM_KINDS, defaultFormat, describeFormat, stepDecimals, type NumKind } from '../../shared/latex/numfmt';
 
@@ -82,6 +83,26 @@ function MoreMenu({ items }: { items: MenuItem[] }) {
   );
 }
 
+/** Opens the right-hand panel on Properties or Comments. */
+function PanelMenu({ comments }: { comments: number }) {
+  const [open, setOpen] = useState<Anchor | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  useOutside(ref, () => setOpen(null));
+  const items: MenuItem[] = [
+    { label: 'Properties', shortcut: 'Ctrl+Alt+P', run: () => togglePanel('properties') },
+    { label: comments ? `Comments (${comments} open)` : 'Comments', shortcut: 'Ctrl+Alt+C', run: () => togglePanel('comments') },
+  ];
+  return (
+    <div ref={ref} style={{ flex: 'none' }}>
+      <button className="tb tb-panel" aria-label={`Properties and comments${comments ? ` (${comments} open comments)` : ''}`} title="Properties and comments" aria-haspopup="menu" aria-expanded={!!open}
+        onMouseDown={(e) => e.preventDefault()} onClick={(e) => setOpen(open ? null : below(e.currentTarget, true))}>
+        <MenuIcon />{comments ? <span className="countpill">{comments}</span> : null}
+      </button>
+      {open && <MenuList items={items} onDone={() => setOpen(null)} at={open} />}
+    </div>
+  );
+}
+
 function ColorButton({ kind }: { kind: 'text' | 'highlight' }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -142,23 +163,26 @@ export function FormatToolbar() {
   const ed = editorRef.current;
   const chain = () => ed!.chain().focus();
   const md = (e: React.MouseEvent) => e.preventDefault();
-  const style = !ed ? 'p' : ed.isActive('heading', { level: 1 }) ? 'h1' : ed.isActive('heading', { level: 2 }) ? 'h2' : ed.isActive('heading', { level: 3 }) ? 'h3' : ed.isActive('codeBlock') ? 'code' : 'p';
-  const btn = (id: string, label: ReactNode, title: string, run: () => void, active?: boolean, aria?: string, cls = '') =>
-    <button className={`tb ${cls}`} aria-label={aria ?? title} title={title} aria-pressed={active} onMouseDown={md} onClick={run} disabled={!ed} data-cmd={id}>{label}</button>;
+  const level = headingLevel(ed);
+  const style = !ed ? 'p' : level ? `h${level}` : ed.isActive('paragraph') ? 'p' : 'other';
+  const btn = (id: string, label: ReactNode, title: string, run: () => void, active?: boolean, aria?: string, cls = '', disabled = !ed) =>
+    <button className={`tb ${cls}`} aria-label={aria ?? title} title={title} aria-pressed={active} onMouseDown={md} onClick={run} disabled={disabled} data-cmd={id}>{label}</button>;
   const items: Item[] = [
     { id: 'style', group: 'style', priority: 1, node: (
       <>
         <label className="sr-only" htmlFor="pstyle">Paragraph style</label>
-        <select id="pstyle" className="field" style={{ width: 128, height: 28 }} value={style} disabled={!ed}
-          onChange={(e) => { const v = e.target.value; if (v === 'p') chain().setParagraph().run(); else if (v === 'code') chain().setCodeBlock({ language: 'Python' }).run(); else chain().setHeading({ level: Number(v[1]) as 1 | 2 | 3 }).run(); }}>
-          <option value="p">Body text</option><option value="h1">Section</option><option value="h2">Subsection</option><option value="h3">Subsubsection</option><option value="code">Code</option>
+        <select id="pstyle" className="field" style={{ width: 148, height: 28 }} value={style} disabled={!ed}
+          onChange={(e) => { const v = e.target.value; if (v === 'p') setBlockStyle(ed!, 0); else if (v[0] === 'h') setBlockStyle(ed!, Number(v.slice(1))); }}>
+          <option value="p">Body text</option>
+          {HEADING_STYLES.map((h) => <option key={h.level} value={`h${h.level}`}>{h.label}</option>)}
+          <option value="other" hidden disabled>—</option>
         </select>
       </>), menu: { label: 'Paragraph style', submenu: [
-        { label: 'Body text', shortcut: 'Ctrl+Alt+0', run: () => chain().setParagraph().run() },
-        { label: 'Section', shortcut: 'Ctrl+Alt+1', run: () => chain().setHeading({ level: 1 }).run() },
-        { label: 'Subsection', shortcut: 'Ctrl+Alt+2', run: () => chain().setHeading({ level: 2 }).run() },
-        { label: 'Subsubsection', shortcut: 'Ctrl+Alt+3', run: () => chain().setHeading({ level: 3 }).run() },
+        { label: 'Body text', shortcut: 'Ctrl+Alt+0', checked: style === 'p', run: () => setBlockStyle(ed!, 0) },
+        ...HEADING_STYLES.map((h) => ({ label: h.label, shortcut: `Ctrl+Alt+${h.level}`, checked: level === h.level, run: () => setBlockStyle(ed!, h.level) })),
       ] } },
+    { id: 'promote', group: 'style', priority: 2, node: btn('promote', <Outdent />, 'Promote heading (one level up)  Alt+Shift+←', () => void shiftHeading(ed!, -1), undefined, 'Promote heading', '', !ed || level <= 1), menu: { label: 'Promote heading', shortcut: 'Alt+Shift+←', disabled: level <= 1, run: () => void shiftHeading(ed!, -1) } },
+    { id: 'demote', group: 'style', priority: 2, node: btn('demote', <Indent />, 'Demote heading (one level down)  Alt+Shift+→', () => void shiftHeading(ed!, 1), undefined, 'Demote heading', '', !ed || !level || level >= MAX_HEADING), menu: { label: 'Demote heading', shortcut: 'Alt+Shift+→', disabled: !level || level >= MAX_HEADING, run: () => void shiftHeading(ed!, 1) } },
     { id: 'bold', group: 'fmt', priority: 1, node: btn('bold', <b>B</b>, 'Bold  Ctrl+B', () => chain().toggleBold().run(), ed?.isActive('bold'), 'Bold'), menu: { label: 'Bold', shortcut: 'Ctrl+B', run: () => chain().toggleBold().run() } },
     { id: 'italic', group: 'fmt', priority: 1, node: btn('italic', <i style={{ fontFamily: 'var(--serif)', fontSize: 14 }}>I</i>, 'Italic  Ctrl+I', () => chain().toggleItalic().run(), ed?.isActive('italic'), 'Italic'), menu: { label: 'Italic', shortcut: 'Ctrl+I', run: () => chain().toggleItalic().run() } },
     { id: 'underline', group: 'fmt', priority: 2, node: btn('underline', <u>U</u>, 'Underline  Ctrl+U', () => chain().toggleUnderline().run(), ed?.isActive('underline'), 'Underline'), menu: { label: 'Underline', shortcut: 'Ctrl+U', run: () => chain().toggleUnderline().run() } },
@@ -180,10 +204,7 @@ export function FormatToolbar() {
   return (
     <div className="toolbar-stack">
       {/* once the panel is open its own tabs take over; these come back when it is closed */}
-      <OverflowBar label="Formatting" items={items} extra={extra} right={panel.open ? null : <>
-        <button className="tb" title="Comments  Ctrl+Alt+C" onClick={() => togglePanel('comments')}>Comments{comments ? <span className="countpill">{comments}</span> : null}</button>
-        <button className="tb" title="Properties panel  Ctrl+Alt+P" onClick={() => togglePanel('properties')}>Properties</button>
-      </>} />
+      <OverflowBar label="Formatting" items={items} extra={extra} right={panel.open ? null : <PanelMenu comments={comments} />} />
       {/* floats over the page instead of pushing it down when the cursor enters a table */}
       {ed?.isActive('table') && <TableToolbar />}
     </div>

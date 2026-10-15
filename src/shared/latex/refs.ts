@@ -49,7 +49,7 @@ export function numberDocument(doc: JNode, blocks: Record<string, GeneratedBlock
   const labels = new Map<string, LabelInfo>();
   const outline: OutlineItem[] = [];
   const numbers = new Map<number, string>();
-  const sec = [0, 0, 0, 0];
+  const sec = [0, 0, 0, 0, 0, 0];
   let eq = 0, tab = 0, fig = 0;
   let appendix = false;
   const secNum = () => {
@@ -61,18 +61,28 @@ export function numberDocument(doc: JNode, blocks: Record<string, GeneratedBlock
     const a = n.attrs ?? {};
     if (n.type === 'rawBlock' && /\\appendix\b/.test(a.latex ?? '')) { appendix = true; sec[1] = 0; }
     if (n.type === 'heading') {
-      const lvl = Math.min(3, Math.max(1, a.level ?? 1));
+      const lvl = Math.min(5, Math.max(1, a.level ?? 1));
       let num = '';
       if (!a.star) {
         sec[lvl]++;
         for (let k = lvl + 1; k < sec.length; k++) sec[k] = 0;
         if (lvl === 1) { eq = 0; tab = 0; fig = 0; }
-        const top = appendix ? String.fromCharCode(64 + sec[1]) : String(sec[1]);
-        num = [top, ...sec.slice(2, lvl + 1)].join('.');
+        // \paragraph and \subparagraph are unnumbered at LaTeX's default secnumdepth (3)
+        if (lvl <= 3) {
+          const top = appendix ? String.fromCharCode(64 + sec[1]) : String(sec[1]);
+          num = [top, ...sec.slice(2, lvl + 1)].join('.');
+        }
       }
       numbers.set(index, num);
       const title = plain(n.content);
-      if (a.label) labels.set(a.label, { label: a.label, kind: 'section', number: num, title });
+      // an unnumbered \paragraph refers to the enclosing numbered (sub)section, as in LaTeX
+      let refNum = num;
+      if (!num && !a.star && lvl > 3) {
+        const parts = [appendix ? String.fromCharCode(64 + sec[1]) : String(sec[1]), ...sec.slice(2, 4).map(String)];
+        while (parts.length > 1 && parts[parts.length - 1] === '0') parts.pop();
+        refNum = parts.join('.');
+      }
+      if (a.label) labels.set(a.label, { label: a.label, kind: 'section', number: refNum, title });
       if (lvl === 1 || outline.length === 0) outline.push({ index, level: lvl, number: num, title, label: a.label || undefined, children: [] });
       else outline.push({ index, level: lvl, number: num, title, label: a.label || undefined, children: [] });
       return;

@@ -49,7 +49,9 @@ export const INLINE_COMMANDS = new Set([
 
 export const CITE_COMMANDS = new Set(['cite', 'citep', 'citet', 'citealp', 'citeauthor', 'citeyear', 'parencite', 'textcite', 'autocite']);
 export const REF_COMMANDS = new Set(['ref', 'eqref', 'autoref', 'cref', 'Cref', 'pageref', 'nameref']);
-export const HEADING_COMMANDS: Record<string, number> = { chapter: 1, section: 1, subsection: 2, subsubsection: 3 };
+export const HEADING_COMMANDS: Record<string, number> = { chapter: 1, section: 1, subsection: 2, subsubsection: 3, paragraph: 4, subparagraph: 5 };
+/** LaTeX command written for each heading level (index = level). */
+export const HEADING_BY_LEVEL = ['section', 'section', 'subsection', 'subsubsection', 'paragraph', 'subparagraph'];
 export const MATH_ENVS = new Set(['equation', 'equation*', 'align', 'align*', 'gather', 'gather*', 'multline', 'multline*', 'displaymath']);
 export const PAGEBREAK_COMMANDS = new Set(['clearpage', 'newpage', 'pagebreak', 'cleardoublepage']);
 

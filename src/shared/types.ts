@@ -280,6 +280,8 @@ export interface TeXWriterApi {
   saveManifest(root: string, manifest: ProjectManifest): Promise<void>;
   readText(root: string, rel: string): Promise<string>;
   writeText(root: string, rel: string, text: string): Promise<void>;
+  /** delete generated/<id>.tex (the block's derived LaTeX; never the script or its output) */
+  removeGeneratedFile(root: string, id: string): Promise<void>;
   readBinary(root: string, rel: string): Promise<Uint8Array>;
   importAsset(root: string, absPath: string, destDir: string): Promise<string>;
   fileUrl(root: string, rel: string): string;

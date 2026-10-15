@@ -25,7 +25,18 @@ export const Search = ({ size = 14, ...p }: P) => <svg {...base(size, p)}><circl
 export const Panel = ({ size = 15, ...p }: P) => <svg {...base(size, { strokeWidth: 1.8, ...p })}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></svg>;
 export const Lock = ({ size = 11, ...p }: P) => <svg {...base(size, p)}><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>;
 export const List = ({ size = 15, ...p }: P) => <svg {...base(size, { strokeWidth: 1.8, ...p })}><path d="M9 6h11M9 12h11M9 18h11" /><circle cx="4.5" cy="6" r="1" /><circle cx="4.5" cy="12" r="1" /><circle cx="4.5" cy="18" r="1" /></svg>;
-export const OList = ({ size = 15, ...p }: P) => <svg {...base(size, { strokeWidth: 1.8, ...p })}><path d="M10 6h10M10 12h10M10 18h10" /><path d="M4 4v4M3 18h3l-3 2h3" /></svg>;
+/** Numbered list: real digits so it reads as "1, 2" next to the bulleted list's dots. */
+export const OList = ({ size = 16, ...p }: P) => (
+  <svg {...base(size, { strokeWidth: 1.8, ...p })}>
+    <path d="M12 7.5h9M12 16.5h9" />
+    <text x="5" y="11.4" fontSize="11" fontWeight="700" textAnchor="middle" fill="currentColor" stroke="none" style={{ fontFamily: 'var(--ui), sans-serif' }}>1</text>
+    <text x="5" y="20.4" fontSize="11" fontWeight="700" textAnchor="middle" fill="currentColor" stroke="none" style={{ fontFamily: 'var(--ui), sans-serif' }}>2</text>
+  </svg>
+);
+export const Trash = ({ size = 13, ...p }: P) => <svg {...base(size, { strokeWidth: 1.8, ...p })}><path d="M4 7h16M10 11v6M14 11v6" /><path d="M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>;
+export const Menu = ({ size = 16, ...p }: P) => <svg {...base(size, { strokeWidth: 1.9, ...p })}><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
+export const Outdent = ({ size = 15, ...p }: P) => <svg {...base(size, { strokeWidth: 1.8, ...p })}><path d="M11 6h9M11 12h9M4 18h16" /><path d="m7 6-3 3 3 3" /></svg>;
+export const Indent = ({ size = 15, ...p }: P) => <svg {...base(size, { strokeWidth: 1.8, ...p })}><path d="M11 6h9M11 12h9M4 18h16" /><path d="m4 6 3 3-3 3" /></svg>;
 export const Folder = ({ size = 16, ...p }: P) => <svg {...base(size, { strokeWidth: 1.8, ...p })}><path d="M3 7h7l2 2h9v10H3z" /></svg>;
 export const Doc = ({ size = 16, ...p }: P) => <svg {...base(size, { strokeWidth: 1.8, ...p })}><path d="M5 4h11l3 3v13H5z" /><path d="M9 10h6M9 14h6" /></svg>;
 export const Gear = ({ size = 16, ...p }: P) => <svg {...base(size, { strokeWidth: 1.8, ...p })}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>;

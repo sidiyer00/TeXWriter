@@ -13,8 +13,8 @@ import { useEffect, useRef, useState, type ReactElement } from 'react';
 import type { TableView } from '../../shared/generate';
 import { numberDocument, refDisplay, shortAuthor } from '../../shared/latex/refs';
 import type { JNode } from '../../shared/latex/model';
-import { getState, useStore, gotoSource, mainFile, mainBlockLines, api, setState, openTab, runGenerator, showBlock, unlinkBlock } from '../store';
-import { Refresh, Link } from '../components/Icons';
+import { getState, useStore, gotoSource, mainFile, mainBlockLines, api, setState, openTab, runGenerator, showBlock, unlinkBlock, deleteBlock } from '../store';
+import { Refresh, Link, Trash } from '../components/Icons';
 import { loadPdfCached, renderPage } from '../pdf';
 import { parseInline } from '../../shared/latex/inline';
 import { TextColor, TeXWriterHighlight } from './marks';
@@ -283,7 +283,7 @@ function GeneratedBlockView(props: ReactNodeViewProps) {
     return (
       <NodeViewWrapper className="blk blk-gen missing" data-drag-handle="">
         <span className="blk-tag">Unknown generated block “{id}”</span>
-        <div className="small" style={{ fontFamily: 'var(--ui)' }}>No entry for this id in texwriter.json. <button className="btn btn-xs" onClick={() => jumpToBlockSource(props)}>View source</button></div>
+        <div className="small" style={{ fontFamily: 'var(--ui)' }}>No entry for this id in texwriter.json. <button className="btn btn-xs" onClick={() => jumpToBlockSource(props)}>View source</button> <button className="btn btn-xs" onClick={() => void deleteBlock(id)}>Delete</button></div>
       </NodeViewWrapper>
     );
   }
@@ -318,6 +318,7 @@ function GeneratedBlockView(props: ReactNodeViewProps) {
         {!cfg.script && cfg.output && cfg.kind === 'table' && <button className="tb" onClick={(e) => { stop(e); void openTab(cfg.output!); }}>Open data</button>}
         <button className="tb" onClick={props_}>Properties</button>
         <button className="tb" onClick={(e) => { stop(e); jumpToBlockSource(props); }}>View source</button>
+        <button className="tb tb-danger" disabled={running} title={`Delete this ${cfg.kind === 'figure' ? 'figure' : 'table'} from the document (the script is kept)`} aria-label="Delete" onClick={(e) => { stop(e); void deleteBlock(id); }}><Trash />Delete</button>
       </div>
       {st === 'failed' && cfg.lastRun && <div className="gen-error small" onClick={props_} role="button" tabIndex={0}>{cfg.lastRun.error} <u>Show output</u></div>}
       {cfg.kind === 'table' && (
@@ -454,7 +455,7 @@ const QHeading = Heading.extend({
       label: { default: '', rendered: false, keepOnSplit: false },
     };
   },
-}).configure({ levels: [1, 2, 3] });
+}).configure({ levels: [1, 2, 3, 4, 5] });
 
 const lowlight = createLowlight(common);
 lowlight.registerAlias({ python: ['Python', 'py'], r: ['R'], sql: ['SQL'], cpp: ['C++', 'cpp'], java: ['Java'], bash: ['Bash', 'sh'], latex: ['TeX', 'LaTeX'] });

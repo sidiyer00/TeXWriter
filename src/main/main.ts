@@ -230,6 +230,11 @@ function registerIpc() {
     selfWrites.set(abs, Date.now());
     await fsp.writeFile(abs, text, 'utf8');
   });
+  handle('removeGeneratedFile', async (root: string, id: string) => {
+    assertRoot(root);
+    if (!/^[\w.-]+$/.test(id)) throw new Error('Bad block id');
+    await fsp.rm(safeJoin(root, `generated/${id}.tex`), { force: true });
+  });
   handle('readBinary', async (root: string, rel: string) => { assertRoot(root); return new Uint8Array(await fsp.readFile(safeJoin(root, rel))); });
   handle('importAsset', async (root: string, abs: string, destDir: string) => {
     assertRoot(root);

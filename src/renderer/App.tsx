@@ -1,4 +1,5 @@
 import { Component, useEffect, type ReactNode } from 'react';
+import { headingLevel, setBlockStyle, shiftHeading } from './visual/headings';
 import { api, compileNow, getState, loadSettings, loadToolchain, runAllGenerators, saveAll, setState, toast, togglePanel, useStore } from './store';
 import { flushVisual } from './visual/VisualEditor';
 import { editorRef } from './visual/editorRef';
@@ -87,7 +88,8 @@ function onKey(e: KeyboardEvent) {
   const ed = editorRef.current!;
   const c = () => ed.chain().focus();
   if (e.key === 'F12') { stop(); followAtCursor(); return; }
-  if (mod && e.altKey && ['0', '1', '2', '3'].includes(e.key)) { stop(); if (e.key === '0') c().setParagraph().run(); else c().setHeading({ level: Number(e.key) as 1 | 2 | 3 }).run(); return; }
+  if (mod && e.altKey && /^[0-5]$/.test(e.key)) { stop(); setBlockStyle(ed, Number(e.key)); return; }
+  if (!mod && e.altKey && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && headingLevel(ed)) { stop(); shiftHeading(ed, e.key === 'ArrowLeft' ? -1 : 1); return; }
   if (mod && e.altKey && k === 'm') { stop(); newComment(); return; }
   if (mod && e.altKey && k === 't') { stop(); setState({ dialog: 'insertTable' }); return; }
   if (mod && e.altKey && k === 'f') { stop(); c().insertContent({ type: 'footnote', attrs: { latex: 'Footnote text.' } }).run(); return; }

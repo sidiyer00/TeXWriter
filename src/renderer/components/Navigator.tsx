@@ -1,9 +1,9 @@
 // Left panel: outline, project files, generated tables and figures, references.
 import { useMemo, useState } from 'react';
-import { allDiagnostics, api, cancelGenerators, gotoSource, guard, mainBlockLines, mainFile, openTab, openContextMenu, runAllGenerators, runGenerator, setState, showBlock, useStore, getState } from '../store';
+import { allDiagnostics, api, cancelGenerators, deleteBlock, gotoSource, guard, mainBlockLines, mainFile, openTab, openContextMenu, runAllGenerators, runGenerator, setState, showBlock, useStore, getState } from '../store';
 import type { ProjectFile } from '../../shared/types';
 import { Down, Right, Doc, Folder } from './Icons';
-import { Panel, Play, Search } from './Icons';
+import { Panel, Play, Search, Trash } from './Icons';
 import { editorRef } from '../visual/editorRef';
 import { scrollToBlock } from '../visual/VisualEditor';
 import { canonicalBlock } from '../../shared/latex/blocks';
@@ -178,11 +178,48 @@ function GeneratedList() {
               <span className={`small ${st === 'failed' || st === 'missing' ? 't-fail' : 'muted'}`}>{text}</span>
             </button>
             {b.script && <button className="btn btn-q btn-xs" disabled={!!gen} title={`Run ${b.script}`} aria-label={`Run ${b.script}`} onClick={() => void runGenerator(b.id)}><Play /></button>}
+            <button className="btn btn-q btn-xs gen-del" disabled={gen?.id === b.id} title={`Delete from the document${b.script ? ` (keeps ${b.script})` : ''}`} aria-label={`Delete ${b.kind} ${b.label || b.id}`} onClick={() => void deleteBlock(b.id)}><Trash /></button>
           </div>
         );
       })}
       {list.length > 0 && <div className="small muted" style={{ padding: '4px 4px 0' }}>Click one to see it in the document with its script, output and log. Ctrl+Shift+G runs all scripts.</div>}
     </div>
+  );
+}
+
+function OutlineHead({ title, open, onToggle, count }: { title: string; open: boolean; onToggle: () => void; count?: number }) {
+  return (
+    <button className="outline-head" aria-expanded={open} onClick={onToggle}>
+      {open ? <Down size={11} /> : <Right size={11} />}<span>{title}</span>{count !== undefined && <span className="muted">{count}</span>}
+    </button>
+  );
+}
+
+/** List of tables / list of figures: every numbered float with its caption, like \listoftables. */
+function FloatList({ kind, title, open, onToggle }: { kind: 'table' | 'figure'; title: string; open: boolean; onToggle: () => void }) {
+  const outline = useStore((s) => s.outline);
+  const labels = useStore((s) => s.labels);
+  const items = useMemo(() => {
+    const byLabel = new Map([...labels.values()].map((l) => [l.label, l]));
+    return outline.flatMap((o) => o.children.filter((c) => c.kind === kind)).map((c) => {
+      const num = c.text.replace(/^\S+\s+/, '');
+      const cap = c.label ? byLabel.get(c.label)?.title ?? '' : '';
+      return { ...c, num, caption: cap.replace(/\\[a-zA-Z]+\*?(\[[^\]]*\])?\{([^}]*)\}/g, '$2').replace(/[{}$\\]/g, '').trim() };
+    });
+  }, [outline, labels, kind]);
+  return (
+    <>
+      <OutlineHead title={title} open={open} onToggle={onToggle} count={items.length} />
+      {open && (items.length === 0
+        ? <div className="small muted" style={{ padding: '2px 10px 6px 26px' }}>No numbered {kind}s yet.</div>
+        : items.map((c) => (
+          <button key={c.index} className="tree lof" title={c.caption || c.text} onClick={() => goToBlock(c.index)}>
+            <span className="num">{c.num}</span>
+            <span className="ellipsis" style={{ flex: 1, minWidth: 0 }}>{c.caption || <span className="muted">(no caption)</span>}</span>
+            {c.generated && <span className="gen-tag" aria-label="generated">gen</span>}
+          </button>
+        )))}
+    </>
   );
 }
 
@@ -199,6 +236,9 @@ export function Navigator() {
   const staleCount = Object.values(renders).filter((r) => r.status === 'pending' || r.status === 'failed').length;
   const genCount = Object.keys(project.manifest.blocks).length;
 
+  const [sections, setSections] = useState({ contents: true, tables: true, figures: true });
+  const toggleSection = (k: keyof typeof sections) => setSections((x) => ({ ...x, [k]: !x[k] }));
+
   // which outline entry holds the cursor
   const activeIdx = useMemo(() => {
     if (!sel) return -1;
@@ -209,27 +249,34 @@ export function Navigator() {
 
   return (
     <aside className="panel-left" aria-label="Project navigator">
-      <div className="tabs" role="tablist" aria-label="Navigator">
-        {(['outline', 'files', 'generated', 'refs'] as const).map((t) => (
-          <button key={t} className="tab" role="tab" aria-selected={tab === t} onClick={() => setState({ navTab: t })}>{t === 'refs' ? 'Refs' : t[0].toUpperCase() + t.slice(1)}</button>
-        ))}
-        <button className="btn btn-q ib btn-sm" style={{ marginLeft: 'auto' }} aria-label="Collapse panel (Ctrl+\)" title="Collapse  Ctrl+\" onClick={() => setState({ navOpen: false })}><Panel /></button>
+      <div className="tabs nav-tabs">
+        <div className="nav-tabs-scroll" role="tablist" aria-label="Navigator">
+          {(['outline', 'files', 'generated', 'refs'] as const).map((t) => (
+            <button key={t} className="tab" role="tab" aria-selected={tab === t} onClick={() => setState({ navTab: t })}>{t === 'refs' ? 'Refs' : t[0].toUpperCase() + t.slice(1)}</button>
+          ))}
+        </div>
+        <button className="btn btn-q ib btn-sm nav-collapse" aria-label="Collapse panel (Ctrl+\)" title="Collapse  Ctrl+\" onClick={() => setState({ navOpen: false })}><Panel /></button>
       </div>
       <div className="scroll" style={{ flex: 1, padding: '10px 8px', display: 'flex', flexDirection: 'column', gap: 1 }}>
         {tab === 'outline' && (
-          outline.length === 0 ? <div className="empty small"><b>No sections yet</b><span className="muted">Headings you add appear here.</span></div> :
-          outline.map((o, k) => (
-            <div key={o.index}>
-              <button className={`tree ${o.level > 1 ? 'sub' : ''} ${k === activeIdx ? 'active' : ''}`} style={o.level > 2 ? { paddingLeft: 36 } : undefined} onClick={() => goToBlock(o.index)}>
-                <span className="num">{o.number}</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.title || '(untitled)'}</span>
-              </button>
-              {k === activeIdx && o.children.map((c) => (
-                <button key={c.index} className="tree leaf" onClick={() => goToBlock(c.index)}>
-                  {c.generated && <span className="gen-tag" aria-label="generated">gen</span>}{c.text}
-                </button>
-              ))}
-            </div>
-          ))
+          <>
+            <OutlineHead title="Contents" open={sections.contents} onToggle={() => toggleSection('contents')} />
+            {sections.contents && (outline.length === 0 ? <div className="empty small"><b>No sections yet</b><span className="muted">Headings you add appear here.</span></div> :
+              outline.map((o, k) => (
+                <div key={o.index}>
+                  <button className={`tree ${o.level > 1 ? 'sub' : ''} ${k === activeIdx ? 'active' : ''}`} style={o.level > 2 ? { paddingLeft: 22 + 14 * (o.level - 1) } : undefined} onClick={() => goToBlock(o.index)}>
+                    {o.number && <span className="num">{o.number}</span>}<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.title || '(untitled)'}</span>
+                  </button>
+                  {k === activeIdx && o.children.map((c) => (
+                    <button key={c.index} className="tree leaf" onClick={() => goToBlock(c.index)}>
+                      {c.generated && <span className="gen-tag" aria-label="generated">gen</span>}{c.text}
+                    </button>
+                  ))}
+                </div>
+              )))}
+            <FloatList kind="table" title="List of tables" open={sections.tables} onToggle={() => toggleSection('tables')} />
+            <FloatList kind="figure" title="List of figures" open={sections.figures} onToggle={() => toggleSection('figures')} />
+          </>
         )}
         {tab === 'files' && <FilesTree />}
         {tab === 'generated' && <GeneratedList />}
