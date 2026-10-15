@@ -7,7 +7,7 @@ import { Properties } from '../components/Properties';
 import { CommentsPanel } from '../components/CommentsPanel';
 import { FormatToolbar } from '../components/Toolbar';
 import { FindBar } from '../components/FindBar';
-import { CompileButton, ExportMenu, RunTestsButton, StatusBar, TitleBar } from '../components/Chrome';
+import { CompileButton, ExportMenu, RunAllButton, StatusBar, TitleBar } from '../components/Chrome';
 import { api, closeTab, getState, guard, mainFile, openContextMenu, openFile, resolveExternal, restoreBlock, setState, unlinkBlock, useStore } from '../store';
 import { Gear, Panel, X } from '../components/Icons';
 
@@ -71,13 +71,13 @@ function SourcePane() {
           <button className="btn btn-q btn-sm" onClick={showInPdf} title="Jump to this line in the PDF (SyncTeX)">Show in PDF</button>
         </div>
       </div>
-      {file.startsWith('generated/') && <div className="banner info" style={{ margin: '8px 10px 0' }}><span className="small">Generated from a test run and rewritten on refresh. Change it through the block's properties, or convert the block to static LaTeX.</span></div>}
+      {file.startsWith('generated/') && <div className="banner info" style={{ margin: '8px 10px 0' }}><span className="small">Written by TeXWriter from the block's output file and rewritten when it changes. Change the script, the output or the block's properties, or convert the block to static LaTeX.</span></div>}
       {loaded ? <SourceEditor key={file} file={file} /> : <div className="cm-host" />}
       {conflicts.map(([id, r]) => (
         <div key={id} className="banner err" role="alert">
           <div className="grow" style={{ flex: '1 1 300px' }}>
             <b>Sync conflict · {project.manifest.blocks[id]?.label || id}</b>
-            <div className="small">{r.message} It is linked to run #{project.manifest.blocks[id]?.run}. Choose which version to keep.</div>
+            <div className="small">{r.message} Choose which version to keep.</div>
           </div>
           <button className="btn btn-sm" onClick={() => void unlinkBlock(id)}>Keep source edit (unlink)</button>
           <button className="btn btn-sm btn-pri" onClick={() => void restoreBlock(id)}>Restore generated</button>
@@ -111,7 +111,7 @@ export function EditorScreen() {
   const project = useStore((s) => s.project)!;
   return (
     <>
-      <TitleBar center={<ModeSwitch />} right={<><RunTestsButton /><CompileButton /><ExportMenu /><button className="btn btn-q no-drag" onClick={() => setState({ view: 'setup' })} title="Document setup" aria-label="Document setup"><Gear /><span className="tlabel">Setup</span></button></>} />
+      <TitleBar center={<ModeSwitch />} right={<><RunAllButton /><CompileButton /><ExportMenu /><button className="btn btn-q no-drag" onClick={() => setState({ view: 'setup' })} title="Document setup" aria-label="Document setup"><Gear /><span className="tlabel">Setup</span></button></>} />
       <div className="body">
         {navOpen ? <Navigator /> : (
           <nav aria-label="Navigator (collapsed)" style={{ width: 44, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 0', background: 'var(--panel)', borderRight: '1px solid var(--rule)' }}>

@@ -10,20 +10,34 @@ import {
   removeRecent, safeJoin, updateRecentStatus, writeManifest, writeState,
 } from './project';
 import { compile, cancelCompile, synctexEdit, synctexView } from './compile';
-import { cancelRun, listRuns, loadRun, runTests } from './runs';
+import { cancelGenerator, runGenerator } from './generators';
 import { pdfPath, provenance, writeBundle } from './exporter';
 import { refreshRegistryDirs, toolchain } from './toolchain';
 import { getSettings, projectsDir, saveSettings } from './settings';
 import type { AppSettings, UserTemplateInput } from '../shared/types';
 import { deleteTemplate, importTemplateFile, listTemplates, saveTemplate, templatesDir } from './userTemplates';
 
+// Settings, recent projects and templates from Quire (the app's earlier name) move over once.
+(function migrateUserData() {
+  try {
+    const now = app.getPath('userData');
+    const old = path.join(app.getPath('appData'), 'Quire');
+    if (!fs.existsSync(old) || fs.existsSync(path.join(now, 'settings.json')) || fs.existsSync(path.join(now, 'recents.json'))) return;
+    fs.mkdirSync(now, { recursive: true });
+    for (const f of ['settings.json', 'recents.json', 'window-state.json', 'templates']) {
+      const src = path.join(old, f);
+      if (fs.existsSync(src)) fs.cpSync(src, path.join(now, f), { recursive: true });
+    }
+  } catch { /* first run without an old install */ }
+})();
+
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'quire-file', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: false } },
+  { scheme: 'texwriter-file', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: false } },
 ]);
 
 let win: BrowserWindow | null = null;
 const watchers = new Map<string, fs.FSWatcher>();
-const DEV_URL = process.env.QUIRE_DEV_URL;
+const DEV_URL = process.env.TEXWRITER_DEV_URL;
 
 function send(channel: string, payload: unknown) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -88,7 +102,7 @@ function createWindow() {
     minHeight: Math.min(640, wa.height),
     show: false,
     backgroundColor: '#EDEAE4',
-    title: 'Quire',
+    title: 'TeXWriter',
     titleBarStyle: 'hidden',
     // square window corners on Windows 11 (maximized windows are always square)
     roundedCorners: false,
@@ -236,7 +250,7 @@ function registerIpc() {
       const w = fs.watch(root, { recursive: true }, (_ev, file) => {
         if (!file) return;
         const rel = String(file).replace(/\\/g, '/');
-        if (rel.startsWith('.quire') || rel.startsWith('.git') || rel.startsWith('runs/') || rel.includes('__pycache__')) return;
+        if (rel.startsWith('.texwriter') || rel.startsWith('.git') || rel.includes('__pycache__')) return;
         const abs = path.join(root, rel);
         const self = selfWrites.get(abs);
         if (self && Date.now() - self < 1500) return;
@@ -261,15 +275,15 @@ function registerIpc() {
   handle('cancelCompile', () => cancelCompile());
   handle('synctexEdit', async (root: string, page: number, x: number, y: number) => { assertRoot(root); return synctexEdit(root, await readManifest(root), page, x, y); });
   handle('synctexView', async (root: string, file: string, line: number) => { assertRoot(root); return synctexView(root, await readManifest(root), file, line); });
-  handle('runTests', async (root: string) => {
+  handle('runGenerator', async (root: string, id: string) => {
     assertRoot(root);
-    const meta = await runTests(root, await readManifest(root), (e) => send('run-event', e));
-    await updateRecentStatus(root);
-    return meta;
+    return runGenerator(root, await readManifest(root), id, (line) => send('generator-event', { id, line }));
   });
-  handle('cancelRun', () => cancelRun());
-  handle('loadRun', (root: string, n: number) => { assertRoot(root); return loadRun(root, n); });
-  handle('listRuns', (root: string) => { assertRoot(root); return listRuns(root); });
+  handle('cancelGenerator', () => cancelGenerator());
+  handle('statFile', async (root: string, rel: string) => {
+    assertRoot(root);
+    try { const st = await fsp.stat(safeJoin(root, rel)); return { mtimeMs: st.mtimeMs, size: st.size }; } catch { return null; }
+  });
   handle('exportPdf', async (root: string) => {
     assertRoot(root);
     const m = await readManifest(root);
@@ -304,7 +318,7 @@ function registerIpc() {
 const selfWrites = new Map<string, number>();
 
 app.whenReady().then(() => {
-  protocol.handle('quire-file', async (req) => {
+  protocol.handle('texwriter-file', async (req) => {
     const u = new URL(req.url);
     const root = u.searchParams.get('root') ?? '';
     const rel = u.searchParams.get('path') ?? '';
@@ -320,7 +334,7 @@ app.whenReady().then(() => {
       cb({
         responseHeaders: {
           ...details.responseHeaders,
-          'Content-Security-Policy': ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: quire-file:; font-src 'self' data:; connect-src 'self' quire-file:; worker-src 'self' blob:"],
+          'Content-Security-Policy': ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: texwriter-file:; font-src 'self' data:; connect-src 'self' texwriter-file:; worker-src 'self' blob:"],
         },
       });
     });

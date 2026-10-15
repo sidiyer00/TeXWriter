@@ -7,9 +7,9 @@ export default defineConfig({
   plugins: [
     react(),
     {
-      name: 'quire-csp',
+      name: 'texwriter-csp',
       apply: 'build',
-      transformIndexHtml: (html: string) => html.replace('<meta charset="utf-8">', `<meta charset="utf-8">\n  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: quire-file:; font-src 'self' data:; connect-src 'self' quire-file:; worker-src 'self' blob:">`),
+      transformIndexHtml: (html: string) => html.replace('<meta charset="utf-8">', `<meta charset="utf-8">\n  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: texwriter-file:; font-src 'self' data:; connect-src 'self' texwriter-file:; worker-src 'self' blob:">`),
     },
   ],
   build: {

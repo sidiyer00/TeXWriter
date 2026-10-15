@@ -15,9 +15,9 @@ predicted PD with observed one-year default rates\footnote{Defaults use the 90-D
   \mathrm{HL} = \sum_{g=1}^{G} \frac{(O_g - N_g\bar{p}_g)^2}{N_g\bar{p}_g(1-\bar{p}_g)}
 \end{equation}
 
-% quire:generated id=tab_calib
+% texwriter:generated id=tab_calib
 \input{generated/tab_calib.tex}
-% quire:end
+% texwriter:end
 
 \begin{itemize}
   \item First \textbf{bold} item
@@ -38,9 +38,9 @@ predicted PD with observed one-year default rates\footnote{Defaults use the 90-D
 \clearpage
 \tableofcontents
 
-\begin{quirecallout}{Finding F-02 · Medium}
+\begin{texwritercallout}{Finding F-02 · Medium}
 Grade 7 under-predicts defaults.
-\end{quirecallout}
+\end{texwritercallout}
 
 \begin{lstlisting}[language=Python]
 def pd(x):
@@ -125,7 +125,7 @@ describe('inline parser', () => {
 
 describe('rich inline marks', () => {
   it('round-trips underline, colour, highlight and links', () => {
-    const src = String.raw`A \underline{u} \textcolor[HTML]{1E4290}{blue \textbf{b}} \quirehl{FFF176}{hi} \textcolor{red}{r} \href{https://x.org/a_b}{site} \url{https://y.org}.`;
+    const src = String.raw`A \underline{u} \textcolor[HTML]{1E4290}{blue \textbf{b}} \texwriterhl{FFF176}{hi} \textcolor{red}{r} \href{https://x.org/a_b}{site} \url{https://y.org}.`;
     const n = parseInline(src);
     expect(n.find((x) => x.marks?.some((m) => m.type === 'underline'))?.text).toBe('u');
     expect(n.find((x) => x.marks?.some((m) => m.type === 'highlight'))?.marks?.[0].attrs).toEqual({ color: 'FFF176' });
@@ -133,9 +133,37 @@ describe('rich inline marks', () => {
     expect(out).toContain('\\underline{u}');
     expect(out).toContain('\\textcolor[HTML]{1E4290}{blue }');
     expect(out).toContain('\\textbf{\\textcolor[HTML]{1E4290}{b}}');
-    expect(out).toContain('\\quirehl{FFF176}{hi}');
+    expect(out).toContain('\\texwriterhl{FFF176}{hi}');
     expect(out).toContain('\\textcolor{red}{r}');
     expect(out).toContain('\\href{https://x.org/a_b}{site}');
     expect(out).toContain('\\url{https://y.org}');
+  });
+});
+
+describe('documents written by Quire (the earlier name)', () => {
+  const tex = String.raw`\documentclass{article}
+\begin{document}
+Some \quirehl{FFF176}{marked} text.
+
+% quire:generated id=tab_x
+\input{generated/tab_x.tex}
+% quire:end
+
+\begin{quirecallout}{Finding}
+Body.
+\end{quirecallout}
+\end{document}
+`;
+  it('parses the old markers, highlight and callout, and keeps their names', () => {
+    const p = parseDocument(tex);
+    const types = p.blocks.map((b) => b.node.type);
+    expect(types).toEqual(['paragraph', 'generatedBlock', 'calloutBlock']);
+    expect(p.blocks[1].node.attrs!.id).toBe('tab_x');
+    const para = p.blocks[0].node.content!;
+    expect(para.some((n) => n.marks?.some((m) => m.type === 'highlight'))).toBe(true);
+    // an edited callout keeps the environment the project's preamble defines
+    const doc = toDocJson(p);
+    doc.content![2] = { ...doc.content![2], attrs: { ...doc.content![2].attrs, src: null } };
+    expect(serializeDocument(p.prefix, doc, p.suffix, p.leading).tex).toContain('\\begin{quirecallout}{Finding}');
   });
 });

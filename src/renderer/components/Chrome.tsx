@@ -1,6 +1,6 @@
 // Title bar, export menu, status bar and small shared widgets.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { api, allDiagnostics, cancelCompile, closeProject, compileNow, dirtyFiles, guard, mainText, runTests, setState, toast, useStore, latestRun } from '../store';
+import { api, allDiagnostics, cancelCompile, cancelGenerators, closeProject, compileNow, dirtyFiles, guard, mainText, runAllGenerators, setState, toast, useStore } from '../store';
 import { Back, Check, Down, Play, Redo, Undo, Warn, X } from './Icons';
 import { editorRef } from '../visual/editorRef';
 import { sourceViewRef } from './SourceEditor';
@@ -41,10 +41,10 @@ export function ExportMenu() {
             <span className="grow"><b style={{ fontWeight: 500 }}>PDF</b><div className="small muted">{lastCompile?.pdfPath ? `${lastCompile.pages ?? '?'} pages, compiled ${new Date(lastCompile.startedAt).toLocaleTimeString()}` : 'Compile first'}</div></span>
           </button>
           <button role="menuitem" onClick={() => go('zip')}>
-            <span className="grow"><b style={{ fontWeight: 500 }}>Source bundle (.zip)</b><div className="small muted">.tex, .bib, figures, generated tables, referenced runs</div></span>
+            <span className="grow"><b style={{ fontWeight: 500 }}>Source bundle (.zip)</b><div className="small muted">.tex, .bib, figures, scripts and their outputs</div></span>
           </button>
           <button role="menuitem" onClick={() => go('prov')}>
-            <span className="grow"><b style={{ fontWeight: 500 }}>Provenance (.json)</b><div className="small muted">Runs, commits and file hashes behind the PDF</div></span>
+            <span className="grow"><b style={{ fontWeight: 500 }}>Provenance (.json)</b><div className="small muted">Scripts, outputs and file hashes behind the PDF</div></span>
           </button>
         </Floating>
       )}
@@ -103,7 +103,7 @@ export function TitleBar({ crumb, center, right }: { crumb?: ReactNode; center?:
   const mac = api.platform === 'darwin';
   return (
     <header className={`titlebar ${mac ? 'mac' : ''}`}>
-      <button className="logo no-drag" aria-label="Quire home" onClick={() => closeProject()}>Q</button>
+      <button className="logo no-drag" aria-label="TeXWriter home" onClick={() => closeProject()}>Q</button>
       <MenuBar />
       <nav className="crumbs" aria-label="Breadcrumb">
         {project ? (
@@ -112,7 +112,7 @@ export function TitleBar({ crumb, center, right }: { crumb?: ReactNode; center?:
             <button onClick={() => setState({ view: 'editor' })} className="cur" style={{ color: crumb ? 'var(--muted-2)' : 'var(--ink)', fontWeight: crumb ? 400 : 600 }}>{project.manifest.name}</button>
             {crumb && <><span className="sep">/</span><span className="cur">{crumb}</span></>}
           </>
-        ) : <span className="cur" style={{ fontWeight: 600 }}>Quire</span>}
+        ) : <span className="cur" style={{ fontWeight: 600 }}>TeXWriter</span>}
       </nav>
       {project && <SaveState />}
       {project && <UndoRedo />}
@@ -126,11 +126,12 @@ export function BackButton({ label = 'Back to report' }: { label?: string }) {
   return <button className="btn btn-q no-drag" style={{ color: 'var(--accent-hover)' }} onClick={() => setState({ view: 'editor' })}><Back />{label}</button>;
 }
 
-export function RunTestsButton() {
-  const running = useStore((s) => s.running);
-  const project = useStore((s) => s.project);
-  if (!project?.manifest.tests.command) return <button className="btn no-drag" onClick={() => setState({ view: 'setup' })} title="No test command configured">Set up tests</button>;
-  return <button className="btn no-drag" disabled={!!running} onClick={() => void runTests()} title="Run test suite (Ctrl+Shift+T)" aria-label={running ? undefined : 'Run tests'}><Play /><span className={running ? '' : 'tlabel'}>{running ? `Running ${running.done}/${running.total || '…'}` : 'Run tests'}</span></button>;
+/** Runs the script of every generated table and figure (Ctrl+Shift+G). */
+export function RunAllButton() {
+  const gen = useStore((s) => s.generating);
+  const count = useStore((s) => Object.values(s.project?.manifest.blocks ?? {}).filter((b) => b.script).length);
+  if (gen) return <button className="btn no-drag" onClick={() => cancelGenerators()} title="Stop the running script">{gen.total > 1 ? `Running ${gen.done + 1}/${gen.total}` : 'Running…'} · Stop</button>;
+  return <button className="btn no-drag" onClick={() => void runAllGenerators()} title={count ? `Run the scripts of ${count} generated table${count === 1 ? '' : 's'}/figure${count === 1 ? '' : 's'} and update them (Ctrl+Shift+G)` : 'Run the scripts behind generated tables and figures (Ctrl+Shift+G)'} aria-label="Run all"><Play /><span className="tlabel">Run all</span></button>;
 }
 
 export function StatusBar({ children }: { children?: ReactNode }) {
@@ -145,8 +146,8 @@ export function StatusBar({ children }: { children?: ReactNode }) {
   const refs = diags.filter((d) => d.kind === 'undefined-reference' || d.kind === 'undefined-citation').length;
   const warns = diags.filter((d) => d.severity === 'warning').length - refs;
   const stale = diags.filter((d) => d.kind === 'stale-block').length;
+  const gen = useStore((s) => s.generating);
   const changed = lastCompile && lastCompile.texHash !== hash(mainText());
-  const latest = latestRun();
   return (
     <footer className="statusbar">
       {compiling ? <span className="sb t-run">Compiling…</span>
@@ -160,10 +161,10 @@ export function StatusBar({ children }: { children?: ReactNode }) {
       {errs > 0 && <button className="sb t-fail" onClick={() => setState({ view: 'review' })}>{errs} error{errs > 1 ? 's' : ''}</button>}
       {refs > 0 && <button className="sb t-warn" onClick={() => setState({ view: 'review' })}><Warn size={12} />{refs} unresolved reference{refs > 1 ? 's' : ''}</button>}
       {warns > 0 && <button className="sb t-warn" onClick={() => setState({ view: 'review' })}>{warns} warning{warns > 1 ? 's' : ''}</button>}
-      {stale > 0 && <button className="sb t-warn" onClick={() => setState({ view: 'review' })}>{stale} stale block{stale > 1 ? 's' : ''}</button>}
+      {stale > 0 && <button className="sb t-warn" onClick={() => setState({ navOpen: true, navTab: 'generated' })}>{stale} generated block{stale > 1 ? 's' : ''} need{stale > 1 ? '' : 's'} a run</button>}
       <span className="spacer" />
       {children}
-      {latest && <button className="sb" onClick={() => setState({ view: 'tests', selectedRun: latest.number })}>Run #{latest.number} · {latest.counts.failed} failed</button>}
+      {gen && <span className="sb t-run">Running {gen.id}{gen.total > 1 ? ` (${gen.done + 1}/${gen.total})` : ''}…</span>}
     </footer>
   );
 }

@@ -7,10 +7,10 @@ await import('./build-main.mjs');
 const server = await createServer({ configFile: 'vite.config.ts' });
 await server.listen();
 const url = server.resolvedUrls.local[0];
-console.log(`[quire] renderer at ${url}`);
+console.log(`[texwriter] renderer at ${url}`);
 const child = spawn(electronPath, ['.'], {
   stdio: 'inherit',
-  env: { ...process.env, QUIRE_DEV_URL: url },
+  env: { ...process.env, TEXWRITER_DEV_URL: url },
 });
 child.on('exit', async (code) => {
   await server.close();

@@ -5,14 +5,16 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { CreateProjectOptions, OpenProject, ProjectFile, ProjectManifest, ProjectState, RecentProject } from '../shared/types';
 import { DEFAULT_THEME } from '../shared/latex/theme';
-import { SAMPLE_BLOCKS, STARTER_BIB, defaultManifest, pendingTex, preambleOptionsFor, preambleTex, reportTex } from './templates';
+import { STARTER_BIB, defaultManifest, journalPreamble, preambleOptionsFor, preambleTex, reportTex } from './templates';
+import { pendingTex } from '../shared/generate';
 import { readTemplate } from './userTemplates';
-import { THEME_BEGIN, applyThemeToClass, applyThemeToPreamble } from '../shared/latex/theme';
+import { applyThemeToClass, applyThemeToPreamble, findThemeBlock } from '../shared/latex/theme';
 import { personalize } from '../shared/latex/skeleton';
-import { listRuns } from './runs';
 
-export const MANIFEST = 'quire.json';
-export const STATE_DIR = '.quire';
+export const MANIFEST = 'texwriter.json';
+export const STATE_DIR = '.texwriter';
+/** File names used by Quire, the app's earlier name; renamed when such a project is opened. */
+const LEGACY: [string, string][] = [['quire.json', MANIFEST], ['.quire', STATE_DIR], ['quire-comments.json', 'texwriter-comments.json']];
 export const BUILD_DIR = path.join(STATE_DIR, 'build');
 
 const openRoots = new Set<string>();
@@ -42,20 +44,37 @@ async function exists(p: string) {
 
 export async function readManifest(root: string): Promise<ProjectManifest> {
   const raw = JSON.parse(await fsp.readFile(path.join(root, MANIFEST), 'utf8'));
-  const m = raw as ProjectManifest;
+  const m = raw as ProjectManifest & { tests?: { python?: string } };
   m.blocks ??= {};
   m.theme = { ...DEFAULT_THEME, ...(m.theme ?? {}), margins: { ...DEFAULT_THEME.margins, ...(m.theme?.margins ?? {}) } };
-  m.tests ??= { command: '' };
+  const g: Partial<ProjectManifest['generators']> = m.generators ?? {};
+  m.generators = { runBeforeCompile: g.runBeforeCompile ?? false, timeoutSec: g.timeoutSec ?? 300, python: g.python ?? m.tests?.python };
   m.engine ??= 'pdflatex';
   m.mainFile ??= 'report.tex';
-  m.refreshBeforeCompile ??= true;
+  // blocks from earlier versions: tables linked to a data file, or to a test run's output
+  for (const b of Object.values(m.blocks)) {
+    if (!b.output && b.dataFile) b.output = b.dataFile;
+    if (!b.output && b.source && b.run) b.output = `runs/${b.run}/${b.source}`;
+  }
   return m;
 }
 
-export async function writeManifest(root: string, m: ProjectManifest): Promise<void> {
-  const tmp = path.join(root, MANIFEST + '.tmp');
-  await fsp.writeFile(tmp, JSON.stringify(m, null, 2) + '\n', 'utf8');
-  await fsp.rename(tmp, path.join(root, MANIFEST));
+const manifestWrites = new Map<string, Promise<void>>();
+let tmpSeq = 0;
+
+/** Write texwriter.json atomically; overlapping saves for one project run one after another. */
+export function writeManifest(root: string, m: ProjectManifest): Promise<void> {
+  const text = JSON.stringify(m, null, 2) + '\n';
+  const prev = manifestWrites.get(root) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(async () => {
+    // the temporary file lives in .texwriter/, which the file watcher ignores
+    await fsp.mkdir(path.join(root, STATE_DIR), { recursive: true });
+    const tmp = path.join(root, STATE_DIR, `manifest-${process.pid}-${++tmpSeq}.tmp`);
+    await fsp.writeFile(tmp, text, 'utf8');
+    await fsp.rename(tmp, path.join(root, MANIFEST));
+  });
+  manifestWrites.set(root, next);
+  return next;
 }
 
 export async function readState(root: string): Promise<ProjectState> {
@@ -102,12 +121,15 @@ export async function listFiles(root: string): Promise<ProjectFile[]> {
 
 export async function loadProject(root: string): Promise<OpenProject> {
   root = path.resolve(root);
+  for (const [from, to] of LEGACY) {
+    if ((await exists(path.join(root, from))) && !(await exists(path.join(root, to)))) await fsp.rename(path.join(root, from), path.join(root, to)).catch(() => undefined);
+  }
   if (!(await exists(path.join(root, MANIFEST)))) await adoptFolder(root);
   const manifest = await readManifest(root);
   openRoots.add(root);
-  const [state, files, runs] = await Promise.all([readState(root), listFiles(root), listRuns(root)]);
-  await touchRecent(root, manifest, state, runs);
-  return { root, manifest, state, files, runs };
+  const [state, files] = await Promise.all([readState(root), listFiles(root)]);
+  await touchRecent(root, manifest, state);
+  return { root, manifest, state, files };
 }
 
 /** Opening a folder of existing .tex files: write a manifest for it. */
@@ -121,8 +143,8 @@ async function adoptFolder(root: string) {
       if (/\\documentclass/.test(t)) { main = f; break; }
     }
   }
-  if (!main) throw new Error('This folder has no quire.json and no LaTeX file with \\documentclass. Choose a project folder or create a new project.');
-  const m = defaultManifest(path.basename(root), 'blank', 'pdflatex', { withSuite: false });
+  if (!main) throw new Error('This folder has no texwriter.json and no LaTeX file with \\documentclass. Choose a project folder or create a new project.');
+  const m = defaultManifest(path.basename(root), 'blank', 'pdflatex');
   m.mainFile = main;
   await writeManifest(root, m);
 }
@@ -137,7 +159,7 @@ export async function createProject(o: CreateProjectOptions): Promise<OpenProjec
   const type = tpl ? tpl.baseType : o.reportType;
   await fsp.mkdir(path.join(root, 'generated'), { recursive: true });
   await fsp.mkdir(path.join(root, 'figures'), { recursive: true });
-  const m = defaultManifest(o.name, type, o.engine, { modelId: o.modelId, owner: o.owner, withSuite: o.includeSampleSuite });
+  const m = defaultManifest(o.name, type, o.engine, { owner: o.owner, academicFormat: tpl ? undefined : o.academicFormat });
   if (tpl?.style && tpl.theme) m.theme = { ...m.theme, ...tpl.theme, margins: { ...m.theme.margins, ...tpl.theme.margins }, headerLeft: o.name };
   if (tpl?.engine) m.engine = tpl.engine;
   if (tpl?.layout && tpl.files && tpl.mainFile && tpl.files[tpl.mainFile]) {
@@ -147,54 +169,54 @@ export async function createProject(o: CreateProjectOptions): Promise<OpenProjec
       await fsp.mkdir(path.dirname(abs), { recursive: true });
       let out = text;
       // Document setup values are applied only where the template carries a style or a
-      // Quire-managed preamble block; an imported journal class keeps its own options
+      // TeXWriter-managed preamble block; an imported journal class keeps its own options
       if (rel === tpl.mainFile) out = personalize(text, { title: o.name, author: o.owner });
       if (rel === tpl.mainFile && tpl.style) out = applyThemeToClass(out, m.theme);
-      else if (rel === 'preamble.tex' && text.includes(THEME_BEGIN)) out = applyThemeToPreamble(text, m.theme);
+      else if (rel === 'preamble.tex' && findThemeBlock(text)) out = applyThemeToPreamble(text, m.theme);
       await fsp.writeFile(abs, out, 'utf8');
     }
     m.mainFile = tpl.mainFile;
     if (!tpl.files['references.bib'] && /\\bibliography\{references\}/.test(tpl.files[tpl.mainFile])) await fsp.writeFile(path.join(root, 'references.bib'), STARTER_BIB, 'utf8');
   } else {
-    await fsp.writeFile(path.join(root, 'report.tex'), applyThemeToClass(reportTex(type, o.name, o.owner, o.modelId), m.theme), 'utf8');
-    await fsp.writeFile(path.join(root, 'preamble.tex'), preambleTex(m.theme, preambleOptionsFor(type)), 'utf8');
+    const fmt = m.academicFormat;
+    await fsp.writeFile(path.join(root, 'report.tex'), applyThemeToClass(reportTex(type, o.name, o.owner, fmt), m.theme), 'utf8');
+    await fsp.writeFile(path.join(root, 'preamble.tex'), m.theme.classLayout && fmt ? journalPreamble(fmt, m.theme) : preambleTex(m.theme, preambleOptionsFor(type, fmt)), 'utf8');
     await fsp.writeFile(path.join(root, 'references.bib'), STARTER_BIB, 'utf8');
   }
-  await fsp.writeFile(path.join(root, '.gitignore'), '.quire/\nruns/*/outputs/*.pdf\n__pycache__/\n', 'utf8');
-  if (o.includeSampleSuite) {
-    const res = resourcesDir();
-    await fsp.cp(path.join(res, 'sample', 'validation'), path.join(root, 'validation'), { recursive: true });
-    await fsp.cp(path.join(res, 'sample', 'data'), path.join(root, 'data'), { recursive: true });
-  }
+  await fsp.writeFile(path.join(root, '.gitignore'), GITIGNORE, 'utf8');
   await writeManifest(root, m);
   return loadProject(root);
 }
 
+const GITIGNORE = '.texwriter/\n__pycache__/\n';
+
+/** The blocks of the sample project: two from scripts, one from a file another program writes. */
+const SAMPLE_BLOCKS = [
+  { id: 'tab_coefficients', kind: 'table' as const, script: 'scripts/fit_model.py', output: 'outputs/coefficients.csv', caption: 'Estimated coefficients of the linear model.', label: 'tab:coefficients', tableStyle: 'booktabs', numberFormat: 'num,d3' },
+  { id: 'fig_fit', kind: 'figure' as const, script: 'scripts/plot_fit.py', output: 'outputs/fit.pdf', caption: 'Fitted against observed values on the holdout sample.', label: 'fig:fit', width: '0.7\\linewidth' },
+  { id: 'tab_holdout', kind: 'table' as const, output: 'data/holdout_metrics.csv', caption: 'Error metrics by sample, as written by the scoring job.', label: 'tab:holdout', tableStyle: 'booktabs' },
+];
+
+/** A short model document whose tables and figure are generated by scripts in the project. */
 export async function createSampleProject(parentDir: string): Promise<OpenProject> {
-  const res = resourcesDir();
-  let name = 'CORP-PD v4.2 Annual Validation';
-  let folder = 'CORP-PD-v4.2-Validation';
+  const res = path.join(resourcesDir(), 'sample');
+  let folder = 'TeXWriter-Example';
   let k = 2;
-  while (await exists(path.join(parentDir, folder))) folder = `CORP-PD-v4.2-Validation-${k++}`;
+  while (await exists(path.join(parentDir, folder))) folder = `TeXWriter-Example-${k++}`;
   const root = path.join(parentDir, folder);
   await fsp.mkdir(path.join(root, 'generated'), { recursive: true });
-  await fsp.mkdir(path.join(root, 'figures'), { recursive: true });
-  const m = defaultManifest(name, 'validation', 'pdflatex', { modelId: 'MRM-0417', owner: 'Model Validation', withSuite: true });
-  m.tests.suiteName = 'validation_suite_v4';
-  m.theme.headerLeft = 'CORP-PD v4.2 · Annual Validation Report 2026';
-  m.dueDate = '2026-10-30';
+  await fsp.mkdir(path.join(root, 'outputs'), { recursive: true });
+  const m = defaultManifest('Example: generated tables and figures', 'documentation', 'pdflatex', { owner: 'TeXWriter' });
   for (const b of SAMPLE_BLOCKS) {
     m.blocks[b.id] = { ...b };
     await fsp.writeFile(path.join(root, 'generated', `${b.id}.tex`), pendingTex(b), 'utf8');
   }
-  await fsp.copyFile(path.join(res, 'sample', 'report.tex'), path.join(root, 'report.tex'));
-  await fsp.copyFile(path.join(res, 'sample', 'references.bib'), path.join(root, 'references.bib'));
+  for (const f of ['report.tex', 'references.bib']) await fsp.copyFile(path.join(res, f), path.join(root, f));
+  await fsp.cp(path.join(res, 'scripts'), path.join(root, 'scripts'), { recursive: true });
+  await fsp.cp(path.join(res, 'data'), path.join(root, 'data'), { recursive: true });
   await fsp.writeFile(path.join(root, 'preamble.tex'), preambleTex(m.theme), 'utf8');
-  await fsp.cp(path.join(res, 'sample', 'validation'), path.join(root, 'validation'), { recursive: true });
-  await fsp.cp(path.join(res, 'sample', 'data'), path.join(root, 'data'), { recursive: true });
-  await fsp.writeFile(path.join(root, '.gitignore'), '.quire/\n__pycache__/\n', 'utf8');
+  await fsp.writeFile(path.join(root, '.gitignore'), GITIGNORE, 'utf8');
   await writeManifest(root, m);
-  name = m.name;
   return loadProject(root);
 }
 
@@ -206,7 +228,7 @@ export async function readRecents(): Promise<RecentProject[]> {
   try {
     const list = JSON.parse(await fsp.readFile(recentsPath(), 'utf8')) as RecentProject[];
     const alive: RecentProject[] = [];
-    for (const r of list) if (await exists(path.join(r.root, MANIFEST))) alive.push(r);
+    for (const r of list) if ((await exists(path.join(r.root, MANIFEST))) || (await exists(path.join(r.root, 'quire.json')))) alive.push(r);
     return alive.sort((a, b) => b.lastOpened.localeCompare(a.lastOpened));
   } catch { return []; }
 }
@@ -216,16 +238,13 @@ async function saveRecents(list: RecentProject[]) {
   await fsp.writeFile(recentsPath(), JSON.stringify(list.slice(0, 30), null, 2), 'utf8');
 }
 
-export async function touchRecent(root: string, m: ProjectManifest, s: ProjectState, runs: Awaited<ReturnType<typeof listRuns>>) {
+export async function touchRecent(root: string, m: ProjectManifest, s: ProjectState) {
   const list = (await readRecents()).filter((r) => path.resolve(r.root) !== path.resolve(root));
-  const last = runs.find((r) => r.status === 'completed');
   list.unshift({
     root,
     name: m.name,
     reportType: m.reportType,
-    modelId: m.modelId,
     lastOpened: new Date().toISOString(),
-    lastRun: last ? { number: last.number, counts: last.counts } : null,
     lastCompile: s.lastCompile ? { at: s.lastCompile.startedAt, ok: s.lastCompile.ok, issues: s.lastCompile.diagnostics.length } : null,
   });
   await saveRecents(list);
@@ -235,9 +254,7 @@ export async function updateRecentStatus(root: string) {
   const list = await readRecents();
   const r = list.find((x) => path.resolve(x.root) === path.resolve(root));
   if (!r) return;
-  const [s, runs] = await Promise.all([readState(root), listRuns(root)]);
-  const last = runs.find((x) => x.status === 'completed');
-  r.lastRun = last ? { number: last.number, counts: last.counts } : null;
+  const s = await readState(root);
   r.lastCompile = s.lastCompile ? { at: s.lastCompile.startedAt, ok: s.lastCompile.ok, issues: s.lastCompile.diagnostics.length } : null;
   await saveRecents(list);
 }

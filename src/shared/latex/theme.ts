@@ -2,8 +2,21 @@
 // preamble.tex and the \documentclass options are ever rewritten.
 import type { ThemeSettings } from '../types';
 
-export const THEME_BEGIN = '% quire:theme begin';
-export const THEME_END = '% quire:theme end';
+export const THEME_BEGIN = '% texwriter:theme begin';
+export const THEME_END = '% texwriter:theme end';
+/** Markers written by Quire, the app's earlier name; recognised and replaced on the next save. */
+const LEGACY_BEGIN = '% quire:theme begin';
+const LEGACY_END = '% quire:theme end';
+
+/** Start and end offsets of the managed block (current or legacy markers), or null. */
+export function findThemeBlock(preamble: string): { begin: number; end: number } | null {
+  for (const [b, e] of [[THEME_BEGIN, THEME_END], [LEGACY_BEGIN, LEGACY_END]]) {
+    const i = preamble.indexOf(b);
+    const j = i >= 0 ? preamble.indexOf(e, i) : -1;
+    if (i >= 0 && j > i) return { begin: i, end: j + e.length };
+  }
+  return null;
+}
 
 export const DEFAULT_THEME: ThemeSettings = {
   preset: 'classic',
@@ -48,13 +61,13 @@ const FONT_PKG: Record<ThemeSettings['bodyFont'], string> = {
 };
 
 /** Load a package if the TeX installation has it; otherwise note it in the log. */
-const optional = (pkg: string, opts = '') => `\\IfFileExists{${pkg}.sty}{\\usepackage${opts ? `[${opts}]` : ''}{${pkg}}}{\\typeout{Quire: package ${pkg} is not installed}}`;
+const optional = (pkg: string, opts = '') => `\\IfFileExists{${pkg}.sty}{\\usepackage${opts ? `[${opts}]` : ''}{${pkg}}}{\\typeout{TeXWriter: package ${pkg} is not installed}}`;
 
 const hex = (s: string) => s.replace(/^#/, '').toUpperCase().padEnd(6, '0').slice(0, 6);
 const tex = (s: string) => s.replace(/([%&#_$])/g, '\\$1');
 
 /** Version of the support macros below; bump when they change so projects are migrated. */
-export const SUPPORT_VERSION = 'quire-support-v4';
+export const SUPPORT_VERSION = 'texwriter-support-v5';
 
 /** Macros the visual editor emits (highlights, merged table cells). Safe to load twice. */
 /**
@@ -64,14 +77,15 @@ export const SUPPORT_VERSION = 'quire-support-v4';
  */
 export const SUPPORT_MACROS = [
   `% ${SUPPORT_VERSION}: macros used by the visual editor`,
-  '\\IfFileExists{soul.sty}{\\usepackage{soul}\\def\\quiresoulok{}}{}',
+  '\\IfFileExists{soul.sty}{\\usepackage{soul}\\def\\texwritersoulok{}}{}',
   '\\IfFileExists{multirow.sty}{\\usepackage{multirow}}{}',
   '\\usepackage{colortbl}',
-  '\\ifx\\quiresoulok\\undefined',
-  '  \\providecommand{\\quirehl}[2]{\\colorbox[HTML]{#1}{#2}}',
+  '\\ifx\\texwritersoulok\\undefined',
+  '  \\providecommand{\\texwriterhl}[2]{\\colorbox[HTML]{#1}{#2}}',
   '\\else',
-  '  \\providecommand{\\quirehl}[2]{{\\definecolor{quirehlc}{HTML}{#1}\\sethlcolor{quirehlc}\\hl{#2}}}',
+  '  \\providecommand{\\texwriterhl}[2]{{\\definecolor{texwriterhlc}{HTML}{#1}\\sethlcolor{texwriterhlc}\\hl{#2}}}',
   '\\fi',
+  '\\providecommand{\\quirehl}{\\texwriterhl}% highlights in documents written with Quire',
   '\\ifx\\multirow\\undefined\\providecommand{\\multirow}[3]{#3}\\fi',
   '\\ifx\\rowcolors\\undefined\\providecommand{\\rowcolors}[3]{}\\fi',
   '% \\qnum[format]{value}{shown}: number-formatted table cell; prints only the shown text',
@@ -79,6 +93,10 @@ export const SUPPORT_MACROS = [
 ];
 
 export function themeBlock(t: ThemeSettings): string {
+  // a journal or publisher class sets page, fonts and headers itself: only the editor's macros
+  if (t.classLayout) {
+    return [`${THEME_BEGIN} — managed by TeXWriter; the document class controls the layout`, ...SUPPORT_MACROS, THEME_END].join('\n');
+  }
   const m = t.margins;
   const side = t.twoSide ? `inner=${m.inner},outer=${m.outer}` : `left=${m.inner},right=${m.outer}`;
   const L = [
@@ -88,14 +106,17 @@ export function themeBlock(t: ThemeSettings): string {
     t.headingFont === 'sans' ? `${optional('helvet', 'scaled=0.92')}\\IfFileExists{sectsty.sty}{\\usepackage{sectsty}\\allsectionsfont{\\sffamily}}{}` : '',
     `\\linespread{${t.lineSpread}}`,
     t.parSkip ? optional('parskip') : '',
-    `\\definecolor{quiretext}{HTML}{${hex(t.textColor)}}`,
-    `\\definecolor{quirelink}{HTML}{${hex(t.printLinksBlack ? t.textColor : t.linkColor)}}`,
-    `\\definecolor{quireshade}{HTML}{${hex(t.tableShade)}}`,
-    `\\definecolor{quirecalloutfill}{HTML}{${hex(t.calloutFill)}}`,
-    '\\color{quiretext}',
-    '\\hypersetup{colorlinks=true,linkcolor=quirelink,citecolor=quirelink,urlcolor=quirelink}',
-    `\\newcommand{\\quireheadleft}{${tex(t.headerLeft)}}`,
-    `\\newcommand{\\quireheadright}{${tex(t.headerRight)}}`,
+    `\\definecolor{texwritertext}{HTML}{${hex(t.textColor)}}`,
+    `\\definecolor{texwriterlink}{HTML}{${hex(t.printLinksBlack ? t.textColor : t.linkColor)}}`,
+    `\\definecolor{texwritershade}{HTML}{${hex(t.tableShade)}}`,
+    `\\definecolor{texwritercalloutfill}{HTML}{${hex(t.calloutFill)}}`,
+    '\\color{texwritertext}',
+    '\\hypersetup{colorlinks=true,linkcolor=texwriterlink,citecolor=texwriterlink,urlcolor=texwriterlink}',
+    `\\newcommand{\\texwriterheadleft}{${tex(t.headerLeft)}}`,
+    `\\newcommand{\\texwriterheadright}{${tex(t.headerRight)}}`,
+    '% names used by preambles written by Quire (the app\'s earlier name)',
+    '\\colorlet{quiretext}{texwritertext}\\colorlet{quirelink}{texwriterlink}\\colorlet{quireshade}{texwritershade}\\colorlet{quirecalloutfill}{texwritercalloutfill}',
+    '\\providecommand{\\quireheadleft}{\\texwriterheadleft}\\providecommand{\\quireheadright}{\\texwriterheadright}',
     ...SUPPORT_MACROS,
     THEME_END,
   ];
@@ -105,11 +126,10 @@ export function themeBlock(t: ThemeSettings): string {
 /** Replace (or insert) the managed block in preamble text. */
 export function applyThemeToPreamble(preamble: string, t: ThemeSettings): string {
   const block = themeBlock(t);
-  const b = preamble.indexOf(THEME_BEGIN);
-  const e = preamble.indexOf(THEME_END);
-  if (b >= 0 && e > b) {
-    const lineStart = preamble.lastIndexOf('\n', b) + 1;
-    return preamble.slice(0, lineStart) + block + preamble.slice(e + THEME_END.length);
+  const found = findThemeBlock(preamble);
+  if (found) {
+    const lineStart = preamble.lastIndexOf('\n', found.begin) + 1;
+    return preamble.slice(0, lineStart) + block + preamble.slice(found.end);
   }
   // insert after the last \usepackage line, before user definitions
   const lines = preamble.split('\n');
@@ -121,6 +141,7 @@ export function applyThemeToPreamble(preamble: string, t: ThemeSettings): string
 
 /** Rewrite \documentclass options for font size / sidedness. */
 export function applyThemeToClass(texMain: string, t: ThemeSettings): string {
+  if (t.classLayout) return texMain;
   return texMain.replace(/\\documentclass(\[[^\]]*\])?\{([^}]+)\}/, (_m, opts: string | undefined, cls: string) => {
     const keep = (opts ? opts.slice(1, -1).split(',') : []).map((s) => s.trim()).filter((s) => s && !/^(10|11|12)pt$/.test(s) && !/^(one|two)side$/.test(s) && !/^(letter|a4)paper$/.test(s));
     const all = [`${t.fontSize}pt`, t.twoSide ? 'twoside' : 'oneside', `${t.paper}paper`, ...keep];
@@ -130,9 +151,9 @@ export function applyThemeToClass(texMain: string, t: ThemeSettings): string {
 
 /** Read theme values back out of an existing managed block (best effort). */
 export function readThemeFromPreamble(preamble: string, base: ThemeSettings): ThemeSettings {
-  const b = preamble.indexOf(THEME_BEGIN);
-  if (b < 0) return base;
-  const block = preamble.slice(b, preamble.indexOf(THEME_END, b));
+  const found = findThemeBlock(preamble);
+  if (!found) return base;
+  const block = preamble.slice(found.begin, found.end);
   const t: ThemeSettings = { ...base, margins: { ...base.margins } };
   const g = /\\usepackage\[([^\]]*)\]\{geometry\}/.exec(block);
   if (g) {

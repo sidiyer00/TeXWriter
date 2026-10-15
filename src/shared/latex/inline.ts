@@ -163,7 +163,7 @@ export function parseInline(s: string, marks: Mark[] = []): JNode[] {
           }
         }
       }
-      if (name === 'quirehl' && !cmd.star) {
+      if ((name === 'texwriterhl' || name === 'quirehl') && !cmd.star) {
         const a = readArgs(s, cmd.nameEnd, 0);
         const b = a.arg !== null ? readArgs(s, a.end, 0) : null;
         if (a.arg !== null && b && b.arg !== null && HEX.test(a.arg.trim())) {
@@ -276,7 +276,7 @@ function wrapMark(m: Mark, t: string): string {
     }
     case 'highlight': {
       const c = String(m.attrs?.color ?? 'FFF176').replace(/^#/, '');
-      return `\\quirehl{${HEX.test(c) ? c.toUpperCase() : 'FFF176'}}{${t}}`;
+      return `\\texwriterhl{${HEX.test(c) ? c.toUpperCase() : 'FFF176'}}{${t}}`;
     }
     default: return t;
   }

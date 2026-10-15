@@ -96,9 +96,9 @@ function generatedLines(text: string): number[] {
   const lines = text.split('\n');
   let inGen = false;
   lines.forEach((l, i) => {
-    if (/^\s*%\s*quire:generated\b/.test(l)) inGen = true;
+    if (/^\s*%\s*texwriter:generated\b/.test(l)) inGen = true;
     if (inGen) out.push(i + 1);
-    if (/^\s*%\s*quire:end\b/.test(l)) inGen = false;
+    if (/^\s*%\s*texwriter:end\b/.test(l)) inGen = false;
   });
   return out;
 }

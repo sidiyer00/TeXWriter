@@ -4,13 +4,13 @@ import { MathInput, type MathInputHandle } from './MathInput';
 import { HEADER_FILLS, TABLE_SIZES, TABLE_SPACING, TABLE_STYLES } from '../../shared/latex/table';
 import { editorRef } from '../visual/editorRef';
 import { texToHtml } from '../visual/nodes';
-import { allDiagnostics, api, getRun, gotoSource, guard, mainBlockLines, mainFile, openTab, refreshBlock, restoreBlock, setState, unlinkBlock, updateBlockConfig, useStore, latestRun } from '../store';
-import { guessHeaderRows, textRows } from '../../shared/latex/grid';
-import { NumberChoice } from './DataTableDialog';
-import { rememberTableStyle } from '../visual/clipboard';
-import { StatusPill, Refresh } from './Icons';
-import { parseCsv } from '../../shared/csv';
+import { allDiagnostics, api, cancelGenerators, gotoSource, guard, mainBlockLines, mainFile, openTab, refreshBlock, restoreBlock, runGenerator, setState, unlinkBlock, updateBlockConfig, useStore } from '../store';
+import { defaultCommand } from '../../shared/generate';
 import { editorBlockLines } from '../visual/VisualEditor';
+import { guessHeaderRows, textRows } from '../../shared/latex/grid';
+import { FIGURE_WIDTHS, NumberChoice } from './GeneratedDialog';
+import { rememberTableStyle } from '../visual/clipboard';
+import { StatusPill, Refresh, Play } from './Icons';
 import { FONT_LABELS } from '../../shared/latex/theme';
 
 function setAttrs(pos: number, patch: Record<string, unknown>) {
@@ -171,174 +171,96 @@ function TablePanel({ pos, attrs }: { pos: number; attrs: Record<string, any> })
   );
 }
 
+/** A generated table or figure: where it comes from, its last run, and how it is typeset. */
 function GeneratedPanel({ id }: { id: string }) {
   const cfg = useStore((s) => s.project?.manifest.blocks[id]);
   const render = useStore((s) => s.renders[id]);
-  const runCache = useStore((s) => s.runCache);
-  const [header, setHeader] = useState<string[]>([]);
-  const latest = latestRun();
+  const gen = useStore((s) => s.generating);
+  const root = useStore((s) => s.project?.root ?? '');
+  const files = useStore((s) => s.project?.files ?? []);
+  const [rows, setRows] = useState<string[][]>([]);
+  const [showLog, setShowLog] = useState(false);
   useEffect(() => {
-    if (!cfg || cfg.kind !== 'table' || !cfg.run || !cfg.source) return;
-    void api.readText(useStoreRoot(), `runs/${cfg.run}/${cfg.source}`).then((t) => setHeader(parseCsv(t).header)).catch(() => setHeader([]));
-    void getRun(cfg.run);
-  }, [cfg?.run, cfg?.source]);
-  if (!cfg) return <div className="sec"><div className="muted">This generated block has no entry in quire.json.</div></div>;
-  if (cfg.dataFile) return <DataTablePanel id={id} />;
-  const rec = cfg.run ? runCache[cfg.run] : null;
+    if (!cfg?.output || cfg.kind !== 'table' || /\.tex$/i.test(cfg.output)) { setRows([]); return; }
+    void api.readText(root, cfg.output).then((t) => setRows(textRows(t, /\.tsv$/i.test(cfg.output!) ? '\t' : undefined))).catch(() => setRows([]));
+  }, [cfg?.output, cfg?.refreshedAt, cfg?.lastRun?.at]);
+  useEffect(() => { if (cfg?.lastRun && !cfg.lastRun.ok) setShowLog(true); }, [cfg?.lastRun?.at]);
+  if (!cfg) return <div className="sec"><div className="muted">This generated block has no entry in texwriter.json.</div></div>;
   const st = render?.status ?? 'pending';
-  const shown = cfg.columns?.length ? cfg.columns : header;
   const u = (p: Parameters<typeof updateBlockConfig>[1]) => void updateBlockConfig(id, p);
+  const running = gen?.id === id;
+  const detected = guessHeaderRows(rows);
+  const h = cfg.headerRows ?? detected;
+  const names = h ? rows[h - 1] ?? [] : (rows[0] ?? []).map((_, i) => `Column ${i + 1}`);
+  const scripts = files.filter((f) => /\.(py|r|jl|js|mjs|sh|ps1|m|bat|cmd)$/i.test(f.path));
+  const run = cfg.lastRun;
   return (
     <>
       <div className="sec">
         <div className="row"><div className="grow"><div className="lbl">Generated {cfg.kind}</div><div style={{ fontWeight: 600, fontSize: 14 }}>{cfg.label || id}</div></div>
-          {st === 'fresh' ? <StatusPill status="passed" label="Up to date" /> : st === 'stale' ? <StatusPill status="warning" label="Stale" /> : st === 'pending' ? <StatusPill status="skipped" label="Pending" /> : <StatusPill status="failed" label={st === 'missing' ? 'Missing' : 'Edited'} />}
+          {running ? <StatusPill status="skipped" label="Running" /> : st === 'fresh' ? <StatusPill status="passed" label="Up to date" /> : st === 'pending' ? <StatusPill status="skipped" label="Not generated" /> : <StatusPill status="failed" label={st === 'failed' ? 'Run failed' : st === 'missing' ? 'Can’t build' : 'Edited'} />}
         </div>
-        {render?.message && st !== 'fresh' && <div className="small t-warn">{render.message}</div>}
+        {render?.message && st !== 'fresh' && st !== 'failed' && <div className="small t-warn">{render.message}</div>}
       </div>
       {(st === 'conflict' || st === 'edited') && (
         <div className="sec" style={{ background: '#FCF1EE' }}>
           <b style={{ color: '#82260F' }}>Hand edits detected</b>
-          <div className="small">{render?.message} Keep your edit as static LaTeX, or restore the generated version.</div>
+          <div className="small">{render?.message} Keep your edit as ordinary LaTeX, or restore the generated version.</div>
           <div className="row wrap"><button className="btn btn-sm" onClick={() => void unlinkBlock(id)}>Keep edit (unlink)</button><button className="btn btn-sm btn-pri" onClick={() => void restoreBlock(id)}>Restore generated</button></div>
         </div>
       )}
       <div className="sec">
-        <div className="lbl">Data source</div>
-        <dl className="kv">
-          <dt>Run</dt><dd>{cfg.run ? <button className="btn btn-q btn-xs" onClick={() => setState({ view: 'tests', selectedRun: cfg.run, selectedTest: cfg.testIds[0] ?? null })}>#{cfg.run}</button> : 'none yet'}{rec ? ` · ${rec.meta.suite}` : ''}</dd>
-          {rec && <><dt>Executed</dt><dd>{new Date(rec.meta.startedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</dd></>}
-          {cfg.source && <><dt>Output</dt><dd className="mono" style={{ fontSize: 11.5 }}>{cfg.source}</dd></>}
-          {cfg.testIds.length > 0 && <><dt>Tests</dt><dd>{cfg.testIds.length} linked{rec?.results ? ` · ${rec.results.tests.filter((t) => cfg.testIds.includes(t.id) && t.status === 'failed').length} failed` : ''}</dd></>}
-        </dl>
-        <div className="row wrap">
-          <button className="btn btn-sm" disabled={!latest} onClick={() => void refreshBlock(id)}><Refresh />Refresh from #{latest?.number ?? '—'}</button>
-          <button className="btn btn-sm" onClick={() => { const l = mainBlockLines(); const idx = editorBlockLines().findIndex(Boolean); void idx; gotoSource(`generated/${id}.tex`, 1); void l; }}>View LaTeX</button>
-        </div>
-        <label className="chk"><input type="checkbox" checked={cfg.followLatest} onChange={(e) => u({ followLatest: e.target.checked })} />Follow the latest run (refresh before compile)</label>
-      </div>
-      {cfg.kind === 'table' && (
-        <>
-          <div className="sec">
-            <div className="row" style={{ justifyContent: 'space-between' }}><span className="lbl">Columns</span><span className="small muted">{shown.filter((c) => !(cfg.hiddenColumns ?? []).includes(c)).length} of {header.length || shown.length}</span></div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 8px' }}>
-              {(header.length ? header : shown).map((c) => (
-                <label key={c} className="chk"><input type="checkbox" checked={!(cfg.hiddenColumns ?? []).includes(c) && (!cfg.columns?.length || cfg.columns.includes(c))}
-                  onChange={(e) => {
-                    const hidden = new Set(cfg.hiddenColumns ?? []);
-                    if (e.target.checked) hidden.delete(c); else hidden.add(c);
-                    const cols = cfg.columns?.length && !cfg.columns.includes(c) && e.target.checked ? [...cfg.columns, c] : cfg.columns;
-                    u({ hiddenColumns: [...hidden], columns: cols });
-                  }} />{c}</label>
-              ))}
-            </div>
-          </div>
-          <div className="sec">
-            <div className="lbl">Format</div>
-            <div className="seg" role="group" aria-label="Table style" style={{ alignSelf: 'flex-start' }}>
-              {(['booktabs', 'grid', 'minimal'] as const).map((s) => <button key={s} aria-pressed={(cfg.style ?? 'booktabs') === s} onClick={() => u({ style: s })}>{s[0].toUpperCase() + s.slice(1)}</button>)}
-            </div>
-            <label className="f">Decimals<select className="field" value={cfg.decimals ?? 2} onChange={(e) => u({ decimals: Number(e.target.value) })}>{[0, 1, 2, 3, 4].map((d) => <option key={d} value={d}>{d}</option>)}</select></label>
-            <label className="f">Show as percent
-              <select className="field" multiple size={Math.min(5, header.length || 3)} value={cfg.percentColumns ?? []} onChange={(e) => u({ percentColumns: [...e.target.selectedOptions].map((o) => o.value) })}>
-                {header.map((h) => <option key={h} value={h}>{h}</option>)}
-              </select>
-            </label>
-            <div className="row" style={{ gap: 6 }}>
-              <label className="f grow">Shade rows where<select className="field" value={cfg.highlight?.column ?? ''} onChange={(e) => u({ highlight: e.target.value ? { column: e.target.value, equals: cfg.highlight?.equals ?? 'Fail' } : null })}><option value="">— none —</option>{header.map((h) => <option key={h}>{h}</option>)}</select></label>
-              {cfg.highlight && <Debounced label="equals" value={cfg.highlight.equals} onCommit={(v) => u({ highlight: { column: cfg.highlight!.column, equals: v } })} />}
-            </div>
-            <label className="chk"><input type="checkbox" checked={cfg.totalRow !== false} onChange={(e) => u({ totalRow: e.target.checked })} />Include total row</label>
-            <label className="chk"><input type="checkbox" checked={cfg.sourceLine !== false} onChange={(e) => u({ sourceLine: e.target.checked })} />Print source line under table</label>
-            <label className="chk"><input type="checkbox" checked={!!cfg.fitWidth} onChange={(e) => u({ fitWidth: e.target.checked })} />Shrink to text width</label>
-          </div>
-        </>
-      )}
-      {cfg.kind === 'summary' && (
-        <div className="sec">
-          <Debounced label="Wording (LaTeX, with {{test.id.value}} placeholders)" multiline rows={6} mono value={cfg.template ?? ''} onCommit={(v) => u({ template: v })} />
-          <div className="small muted">Fields: value, status, threshold, metric, notes, details.KEY. Values update from each run; the wording stays yours.</div>
-        </div>
-      )}
-      {cfg.kind === 'figure' && (
-        <div className="sec">
-          <Debounced label="Width" mono value={cfg.width ?? '0.85\\linewidth'} onCommit={(v) => u({ width: v })} />
-        </div>
-      )}
-      {cfg.kind !== 'summary' && (
-        <div className="sec">
-          <div className="lbl">Caption and label</div>
-          <Debounced label="Caption" multiline value={cfg.caption ?? ''} onCommit={(v) => u({ caption: v })} />
-          <Debounced label="Label" mono value={cfg.label ?? ''} onCommit={(v) => u({ label: v.trim() })} />
-          <RefCount label={cfg.label} />
-        </div>
-      )}
-      <div className="sec">
-        <div className="lbl">Ownership</div>
-        <div className="small muted">Values come from the run. To change numbers by hand, convert to static LaTeX; it then stops updating.</div>
-        <button className="btn btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => void unlinkBlock(id)}>Convert to static LaTeX…</button>
-      </div>
-    </>
-  );
-}
-
-/** A table linked to a CSV/TSV file in the project (Insert → Table from data file). */
-function DataTablePanel({ id }: { id: string }) {
-  const cfg = useStore((s) => s.project?.manifest.blocks[id])!;
-  const render = useStore((s) => s.renders[id]);
-  const root = useStore((s) => s.project?.root ?? '');
-  const files = useStore((s) => s.project?.files ?? []);
-  const [rows, setRows] = useState<string[][]>([]);
-  useEffect(() => { void api.readText(root, cfg.dataFile!).then((t) => setRows(textRows(t, /\.tsv$/i.test(cfg.dataFile!) ? '\t' : undefined))).catch(() => setRows([])); }, [cfg.dataFile, cfg.refreshedAt]);
-  const detected = guessHeaderRows(rows);
-  const h = cfg.headerRows ?? detected;
-  const names = h ? rows[h - 1] ?? [] : (rows[0] ?? []).map((_, i) => `Column ${i + 1}`);
-  const st = render?.status ?? 'pending';
-  const u = (p: Parameters<typeof updateBlockConfig>[1]) => void updateBlockConfig(id, p);
-  return (
-    <>
-      <div className="sec">
-        <div className="row"><div className="grow"><div className="lbl">Linked table</div><div style={{ fontWeight: 600, fontSize: 14 }}>{cfg.label || id}</div></div>
-          {st === 'fresh' ? <StatusPill status="passed" label="Up to date" /> : <StatusPill status="failed" label={st === 'missing' ? 'Missing' : 'Edited'} />}
-        </div>
-        {render?.message && st !== 'fresh' && <div className="small t-warn">{render.message}</div>}
-      </div>
-      {(st === 'conflict' || st === 'edited') && (
-        <div className="sec" style={{ background: '#FCF1EE' }}>
-          <b style={{ color: '#82260F' }}>Hand edits detected</b>
-          <div className="small">{render?.message} Keep your edit as an editable table, or restore the version built from the file.</div>
-          <div className="row wrap"><button className="btn btn-sm" onClick={() => void unlinkBlock(id)}>Keep edit (unlink)</button><button className="btn btn-sm btn-pri" onClick={() => void restoreBlock(id)}>Restore generated</button></div>
-        </div>
-      )}
-      <div className="sec">
-        <div className="lbl">Data file</div>
-        <select className="field mono" aria-label="Data file" value={cfg.dataFile} onChange={(e) => u({ dataFile: e.target.value, columns: undefined, hiddenColumns: undefined })}>
-          {files.filter((f) => /\.(csv|tsv|txt)$/i.test(f.path) && !f.path.startsWith('runs/')).map((f) => <option key={f.path} value={f.path}>{f.path}</option>)}
-        </select>
-        <div className="small muted">Saved in the file → the table is rewritten (generated/{id}.tex), shown here and used by the next compile.</div>
-        <div className="row wrap">
-          <button className="btn btn-sm" onClick={() => void refreshBlock(id)}><Refresh />Refresh now</button>
-          <button className="btn btn-sm" onClick={() => void openTab(cfg.dataFile!)}>Open data</button>
-          <button className="btn btn-sm" onClick={() => gotoSource(`generated/${id}.tex`, 1)}>View LaTeX</button>
-        </div>
-      </div>
-      <div className="sec">
-        <div className="lbl">Layout</div>
-        <label className="f">Header rows
-          <select className="field" value={cfg.headerRows ?? 'auto'} onChange={(e) => u({ headerRows: e.target.value === 'auto' ? undefined : Number(e.target.value), columns: undefined, hiddenColumns: undefined })}>
-            <option value="auto">Detect ({detected})</option>
-            {[0, 1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}{n > 1 ? ' (multi-level)' : ''}</option>)}
+        <div className="lbl">Source</div>
+        <label className="f">Script <span className="small muted">— leave empty if another program writes the output</span>
+          <select className="field mono" value={cfg.script ?? ''} onChange={(e) => u({ script: e.target.value || undefined })}>
+            <option value="">No script</option>
+            {cfg.script && !scripts.some((f) => f.path === cfg.script) && <option value={cfg.script}>{cfg.script} (missing)</option>}
+            {scripts.map((f) => <option key={f.path} value={f.path}>{f.path}</option>)}
           </select>
         </label>
-        <label className="f">Style
-          <select className="field" value={cfg.tableStyle ?? 'booktabs'} onChange={(e) => { rememberTableStyle(e.target.value); u({ tableStyle: e.target.value }); }}>{TABLE_STYLES.map((t) => <option key={t.id} value={t.id} title={t.hint}>{t.label}</option>)}</select>
-        </label>
-        <label className="f">Text size<select className="field" value={cfg.size ?? ''} onChange={(e) => u({ size: e.target.value })}>{TABLE_SIZES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}</select></label>
-        <NumberChoice value={cfg.numberFormat} onChange={(v) => u({ numberFormat: v })} />
-        <label className="chk"><input type="checkbox" checked={!!cfg.sourceLine} onChange={(e) => u({ sourceLine: e.target.checked })} />Print the file name under the table</label>
-        <label className="chk"><input type="checkbox" checked={!!cfg.fitWidth} onChange={(e) => u({ fitWidth: e.target.checked })} />Shrink to text width</label>
+        <Debounced label={cfg.script ? 'Output it writes' : 'File the block is built from'} mono value={cfg.output ?? ''} onCommit={(v) => u({ output: v.trim() || undefined })} placeholder={cfg.kind === 'table' ? 'outputs/table.csv' : 'outputs/figure.pdf'} />
+        {cfg.script && <Debounced label="Command (optional)" mono value={cfg.command ?? ''} onCommit={(v) => u({ command: v.trim() || undefined })} placeholder={defaultCommand(cfg.script)} />}
+        <div className="row wrap">
+          {cfg.script && <button className="btn btn-sm btn-pri" disabled={!!gen} onClick={() => void runGenerator(id)}><Play />{running ? 'Running…' : 'Run script'}</button>}
+          {running && <button className="btn btn-sm" onClick={() => cancelGenerators()}>Stop</button>}
+          {cfg.script && <button className="btn btn-sm" onClick={() => void openTab(cfg.script!)}>Edit script</button>}
+          {cfg.output && cfg.kind === 'table' && <button className="btn btn-sm" onClick={() => void openTab(cfg.output!)}>Open output</button>}
+          {!cfg.script && <button className="btn btn-sm" onClick={() => void refreshBlock(id)}><Refresh />Re-read</button>}
+          <button className="btn btn-sm btn-q" onClick={() => gotoSource(`generated/${id}.tex`, 1)}>View LaTeX</button>
+        </div>
+        {running && <pre className="logbox gen-log">{(gen?.log ?? []).join('\n') || 'Starting…'}</pre>}
+        {!running && run && (
+          <div className="col" style={{ gap: 4 }}>
+            <div className={`small ${run.ok ? 'muted' : 't-fail'}`}>{run.ok ? 'Last run' : 'Last run failed'} {new Date(run.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · {(run.durationMs / 1000).toFixed(1)} s{run.error ? ` · ${run.error}` : ''}</div>
+            <button className="btn btn-q btn-xs" style={{ alignSelf: 'flex-start' }} onClick={() => setShowLog(!showLog)}>{showLog ? 'Hide output' : 'Show output'}</button>
+            {showLog && <pre className="logbox gen-log">{run.log}</pre>}
+          </div>
+        )}
+        {!cfg.script && <div className="small muted">The {cfg.kind} is rebuilt whenever {cfg.output ?? 'the file'} changes.</div>}
       </div>
-      {names.length > 0 && (
+      {cfg.kind === 'table' && (
+        <div className="sec">
+          <div className="lbl">Table</div>
+          {!/\.tex$/i.test(cfg.output ?? '') && (
+            <label className="f">Header rows
+              <select className="field" value={cfg.headerRows ?? 'auto'} onChange={(e) => u({ headerRows: e.target.value === 'auto' ? undefined : Number(e.target.value), columns: undefined, hiddenColumns: undefined })}>
+                <option value="auto">Detect ({detected})</option>
+                {[0, 1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}{n > 1 ? ' (multi-level)' : ''}</option>)}
+              </select>
+            </label>
+          )}
+          {!/\.tex$/i.test(cfg.output ?? '') && (
+            <label className="f">Style
+              <select className="field" value={cfg.tableStyle ?? 'booktabs'} onChange={(e) => { rememberTableStyle(e.target.value); u({ tableStyle: e.target.value }); }}>{TABLE_STYLES.map((t) => <option key={t.id} value={t.id} title={t.hint}>{t.label}</option>)}</select>
+            </label>
+          )}
+          <label className="f">Text size<select className="field" value={cfg.size ?? ''} onChange={(e) => u({ size: e.target.value })}>{TABLE_SIZES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}</select></label>
+          {!/\.tex$/i.test(cfg.output ?? '') && <NumberChoice value={cfg.numberFormat} onChange={(v) => u({ numberFormat: v })} />}
+          <label className="chk"><input type="checkbox" checked={!!cfg.sourceLine} onChange={(e) => u({ sourceLine: e.target.checked })} />Print the file name under the table</label>
+          <label className="chk"><input type="checkbox" checked={!!cfg.fitWidth} onChange={(e) => u({ fitWidth: e.target.checked })} />Shrink to text width</label>
+        </div>
+      )}
+      {cfg.kind === 'table' && names.length > 0 && (
         <div className="sec">
           <div className="row" style={{ justifyContent: 'space-between' }}><span className="lbl">Columns</span><span className="small muted">{names.filter((c) => !(cfg.hiddenColumns ?? []).includes(c)).length} of {names.length}</span></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 8px' }}>
@@ -349,6 +271,13 @@ function DataTablePanel({ id }: { id: string }) {
           </div>
         </div>
       )}
+      {cfg.kind === 'figure' && (
+        <div className="sec">
+          <div className="lbl">Figure</div>
+          <label className="f">Width<select className="field mono" value={cfg.width ?? '0.8\\linewidth'} onChange={(e) => u({ width: e.target.value })}>{[...new Set([cfg.width ?? '0.8\\linewidth', ...FIGURE_WIDTHS])].map((w) => <option key={w} value={w}>{w}</option>)}</select></label>
+          <label className="chk"><input type="checkbox" checked={!!cfg.sourceLine} onChange={(e) => u({ sourceLine: e.target.checked })} />Print the file name under the figure</label>
+        </div>
+      )}
       <div className="sec">
         <div className="lbl">Caption and label</div>
         <Debounced label="Caption" multiline value={cfg.caption ?? ''} onCommit={(v) => u({ caption: v })} />
@@ -357,15 +286,12 @@ function DataTablePanel({ id }: { id: string }) {
       </div>
       <div className="sec">
         <div className="lbl">Ownership</div>
-        <div className="small muted">The cells come from the file. To edit them in the document, convert to an editable table; it then stops following the file.</div>
-        <button className="btn btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => void unlinkBlock(id)}>Convert to editable table</button>
+        <div className="small muted">The content comes from {cfg.script ? 'the script' : 'the file'}. To edit it by hand instead, convert it to ordinary LaTeX; it then stops updating.</div>
+        <button className="btn btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => void unlinkBlock(id)}>Convert to static LaTeX…</button>
       </div>
     </>
   );
 }
-
-let rootCache = '';
-function useStoreRoot() { return rootCache; }
 
 function RefCount({ label }: { label?: string }) {
   const text = useStore((s) => s.files[mainFile()]?.text ?? '');
@@ -426,11 +352,11 @@ function DocumentPanel() {
         <dl className="kv"><dt>Main file</dt><dd className="mono">{project.manifest.mainFile}</dd><dt>Engine</dt><dd>{project.manifest.engine}</dd><dt>Words</dt><dd>~{words.toLocaleString()}</dd><dt>Labels</dt><dd>{labels.size}</dd><dt>Pages</dt><dd>{lastCompile?.pages ?? '—'}</dd><dt>Issues</dt><dd>{diag.length}</dd></dl>
       </div>
       <div className="sec"><div className="lbl">Page and type</div>
-        <div className="small">{t.paper === 'a4' ? 'A4' : 'US Letter'} · {t.fontSize} pt {FONT_LABELS[t.bodyFont]} · margins {t.margins.top} / {t.margins.inner}</div>
+        <div className="small">{t.classLayout ? `Set by the document class (${project.manifest.academicFormat ?? 'journal'} format)` : `${t.paper === 'a4' ? 'A4' : 'US Letter'} · ${t.fontSize} pt ${FONT_LABELS[t.bodyFont]} · margins ${t.margins.top} / ${t.margins.inner}`}</div>
         <button className="btn btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => setState({ view: 'setup' })}>Document setup…</button>
       </div>
       <div className="sec"><div className="lbl">Tips</div>
-        <div className="small muted">Select an equation, table, citation or reference to edit its settings here. Type <span className="mono">$x$</span> for inline math. Anything the visual editor cannot represent stays as LaTeX you can edit in the source view (Ctrl+2).</div>
+        <div className="small muted">Select an equation, table, generated table or figure, citation or reference to edit its settings here. Type <span className="mono">$x$</span> for inline math. Anything the visual editor cannot represent stays as LaTeX you can edit in the source view (Ctrl+2).</div>
       </div>
     </>
   );
@@ -439,7 +365,6 @@ function DocumentPanel() {
 export function Properties() {
   const sel = useStore((s) => s.selection);
   const project = useStore((s) => s.project);
-  rootCache = project?.root ?? '';
   const titleFor: Record<string, string> = { heading: 'Heading', paragraph: 'Paragraph', mathBlock: 'Equation', generatedBlock: 'Generated content', figureBlock: 'Figure', rawBlock: 'LaTeX block', tableBlock: 'Table', calloutBlock: 'Callout', codeBlock: 'Code block', bulletList: 'List', orderedList: 'Numbered list', pageBreak: 'Page break' };
   let body: React.ReactNode;
   if (!sel) body = <DocumentPanel />;

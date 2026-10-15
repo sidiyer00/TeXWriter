@@ -2,20 +2,19 @@
 // React components, the TipTap editor and CodeMirror in step without a framework.
 import { useSyncExternalStore } from 'react';
 import type {
-  AppSettings, CommentThread, CompileResult, Diagnostic, GeneratedBlockConfig, OpenProject, ProjectManifest, RunMeta, RunRecord, SpellInfo, ToolchainInfo, ThemeSettings,
+  AppSettings, CommentThread, CompileResult, Diagnostic, GeneratedBlockConfig, OpenProject, ProjectManifest, SpellInfo, ToolchainInfo, ThemeSettings,
 } from '../shared/types';
 import { parseDocument, toDocJson, serializeDocument, blockLines, ParsedDocument } from '../shared/latex/blocks';
 import { parseBib, BibEntry, numberDocument, LabelInfo, OutlineItem } from '../shared/latex/refs';
-import { parseCsv } from '../shared/csv';
-import { renderTable, renderSummary, renderFigure, renderDataTable, BlockView, blockStatus } from '../shared/generate';
+import { renderGenerated, pendingTex, starterScript, type BlockView, type ScriptLanguage } from '../shared/generate';
 import { hash } from '../shared/latex/scan';
 import { closest } from '../shared/latex/log';
 import type { JNode } from '../shared/latex/model';
-import { applyThemeToClass, applyThemeToPreamble, SUPPORT_MACROS, SUPPORT_VERSION, THEME_BEGIN } from '../shared/latex/theme';
+import { applyThemeToClass, applyThemeToPreamble, findThemeBlock, SUPPORT_MACROS, SUPPORT_VERSION } from '../shared/latex/theme';
 
-export const api = window.quire;
+export const api = window.texwriter;
 
-export type View = 'home' | 'editor' | 'tests' | 'review' | 'setup' | 'settings';
+export type View = 'home' | 'editor' | 'review' | 'setup' | 'settings';
 export type Mode = 'visual' | 'split' | 'source';
 export type Origin = 'visual' | 'source' | 'disk' | 'app';
 
@@ -30,20 +29,26 @@ export interface Selection {
   inline?: { type: string; attrs: Record<string, any>; pos: number } | null;
 }
 
-export interface BlockRender { view: BlockView | null; status: 'fresh' | 'stale' | 'pending' | 'missing' | 'conflict' | 'edited'; message?: string; texHash?: string }
+/**
+ * fresh: built from its output · pending: no output yet (a placeholder is in the document)
+ * failed: the last script run failed (the previous output, if any, is shown) · missing: the
+ * output can't be used · conflict/edited: the LaTeX was changed by hand
+ */
+export interface BlockRender { view: BlockView | null; status: 'fresh' | 'pending' | 'failed' | 'missing' | 'conflict' | 'edited'; message?: string; texHash?: string }
 
 export interface State {
   view: View;
   mode: Mode;
   navOpen: boolean;
-  navTab: 'outline' | 'files' | 'tests' | 'refs';
+  navTab: 'outline' | 'files' | 'generated' | 'refs';
   toolchain: ToolchainInfo | null;
   project: OpenProject | null;
   files: Record<string, FileState>;
   sourceFile: string;
-  runs: RunMeta[];
-  runCache: Record<number, RunRecord>;
-  running: { done: number; total: number; label: string; startedAt: number; log: string[] } | null;
+  /** a generated block's script is running (done/total when running several) */
+  generating: { id: string; done: number; total: number; log: string[] } | null;
+  /** ask the visual editor to scroll to a generated block */
+  focusBlock: { id: string; index: number; nonce: number } | null;
   compiling: { passes: string[]; startedAt: number } | null;
   lastCompile: CompileResult | null;
   pdfVersion: number;
@@ -60,8 +65,6 @@ export interface State {
   renders: Record<string, BlockRender>;
   externalChange: string | null;
   toast: { text: string; kind?: 'err' | 'ok'; action?: { label: string; run: () => void } } | null;
-  selectedRun: number | null;
-  selectedTest: string | null;
   reviewPage: number;
   reviewIssue: string | null;
   jump: { file: string; line: number; nonce: number } | null;
@@ -82,9 +85,9 @@ export interface State {
   spell: SpellInfo | null;
   quickOpen: boolean;
   equationModal: { pos: number; inline: boolean } | null;
-  dialog: 'insertTable' | 'numberFormat' | 'shortcuts' | 'about' | 'dataTable' | 'saveTemplate' | null;
-  /** data file preselected in Insert → Table from data file */
-  dataTableFile: string | null;
+  dialog: 'insertTable' | 'numberFormat' | 'shortcuts' | 'about' | 'generated' | 'saveTemplate' | null;
+  /** how the New generated table/figure dialog opens */
+  generatedInit: { kind: 'table' | 'figure'; mode: 'new' | 'script' | 'file'; file?: string } | null;
   prompt: { title: string; label: string; value: string; resolve: (v: string | null) => void } | null;
   picker: 'cite' | 'ref' | null;
   /** bumps when the visual editor instance changes */
@@ -104,11 +107,11 @@ export interface MenuItem {
 
 const initial: State = {
   view: 'home', mode: 'visual', navOpen: true, navTab: 'outline', toolchain: null, project: null, files: {}, sourceFile: '',
-  runs: [], runCache: {}, running: null, compiling: null, lastCompile: null, pdfVersion: 0, selection: null, sourceLine: null, syncLines: null, syncIndex: null,
+  generating: null, focusBlock: null, compiling: null, lastCompile: null, pdfVersion: 0, selection: null, sourceLine: null, syncLines: null, syncIndex: null,
   bib: [], labels: new Map(), outline: [], numbers: new Map(), renders: {}, externalChange: null, toast: null,
-  selectedRun: null, selectedTest: null, reviewPage: 1, reviewIssue: null, jump: null, pdfJump: null, insertAfter: null,
+  reviewPage: 1, reviewIssue: null, jump: null, pdfJump: null, insertAfter: null,
   settings: null, openTabs: [], panel: { open: false, tab: 'properties' }, find: null, comments: [], activeComment: null, draftComment: null,
-  contextMenu: null, spell: null, quickOpen: false, equationModal: null, dialog: null, dataTableFile: null, prompt: null, picker: null, editorTick: 0,
+  contextMenu: null, spell: null, quickOpen: false, equationModal: null, dialog: null, generatedInit: null, prompt: null, picker: null, editorTick: 0,
 };
 
 let state: State = initial;
@@ -121,7 +124,7 @@ export function setState(patch: Partial<State> | ((s: State) => Partial<State>))
   listeners.forEach((l) => l());
 }
 // read-only hook for automated UI tests and debugging from DevTools
-(window as unknown as { __quireState: () => State }).__quireState = () => state;
+(window as unknown as { __texwriterState: () => State }).__texwriterState = () => state;
 
 export function subscribe(l: () => void) { listeners.add(l); return () => { listeners.delete(l); }; }
 export function useStore<T>(sel: (s: State) => T): T {
@@ -144,7 +147,6 @@ export function root() { return state.project?.root ?? ''; }
 export function manifest(): ProjectManifest { return state.project!.manifest; }
 export function mainFile() { return state.project?.manifest.mainFile ?? 'report.tex'; }
 export function mainText() { return state.files[mainFile()]?.text ?? ''; }
-export function latestRun(): RunMeta | null { return state.runs.find((r) => r.status === 'completed') ?? null; }
 
 let parsedCache: { text: string; parsed: ParsedDocument } | null = null;
 export function parsedMain(): ParsedDocument {
@@ -219,9 +221,9 @@ export async function openFile(rel: string): Promise<string> {
 
 async function onDiskChange(rel: string) {
   const f = state.files[rel];
-  if (rel === 'quire.json') return;
+  if (rel === 'texwriter.json') return;
   if (rel === COMMENTS_FILE) { void loadComments(); return; }
-  if (state.project && Object.values(manifest().blocks).some((b) => b.dataFile === rel)) void refreshDataTables(rel);
+  if (state.project && Object.values(manifest().blocks).some((b) => b.output === rel)) void refreshForOutput(rel);
   if (!f) { void refreshFileList(); return; }
   let disk: string;
   try { disk = await api.readText(root(), rel); } catch { return; }
@@ -277,7 +279,7 @@ export async function openProject(rootDir: string) {
   unsubs.forEach((u) => u());
   unsubs = [];
   parsedCache = null;
-  setState({ ...initial, toolchain: state.toolchain, settings: state.settings, project: p, runs: p.runs, view: 'editor', sourceFile: p.manifest.mainFile, openTabs: [p.manifest.mainFile], lastCompile: null, pdfVersion: 1 });
+  setState({ ...initial, toolchain: state.toolchain, settings: state.settings, project: p, view: 'editor', sourceFile: p.manifest.mainFile, openTabs: [p.manifest.mainFile], lastCompile: null, pdfVersion: 1 });
   const m = p.manifest;
   await guard(async () => {
     await openFile(m.mainFile);
@@ -286,16 +288,14 @@ export async function openProject(rootDir: string) {
   await migrateSupportMacros();
   derive();
   await loadComments();
-  await loadRunsCache();
   await renderAllBlocks();
   void api.watchProject(p.root);
   unsubs.push(api.onFileChanged((rel) => void onDiskChange(rel)));
   unsubs.push(api.onCompileEvent((e) => {
     if (e.type === 'pass') setState((s) => ({ compiling: s.compiling ? { ...s.compiling, passes: [...s.compiling.passes, e.name] } : s.compiling }));
   }));
-  unsubs.push(api.onRunEvent((e) => {
-    if (e.type === 'progress') setState((s) => ({ running: s.running ? { ...s.running, done: e.done, total: e.total, label: e.label } : s.running }));
-    if (e.type === 'log') setState((s) => ({ running: s.running ? { ...s.running, log: [...s.running.log.slice(-200), e.line] } : s.running }));
+  unsubs.push(api.onGeneratorEvent((e) => {
+    setState((s) => ({ generating: s.generating && s.generating.id === e.id ? { ...s.generating, log: [...s.generating.log.slice(-300), e.line] } : s.generating }));
   }));
   if (p.state.lastCompile) setState({ lastCompile: { ...p.state.lastCompile, log: '' } as CompileResult });
 }
@@ -310,180 +310,178 @@ export function closeProject() {
 export async function saveManifest(m: ProjectManifest) {
   if (!state.project) return;
   setState((s) => ({ project: s.project ? { ...s.project, manifest: m } : s.project }));
-  await guard(() => api.saveManifest(root(), m), 'Could not save quire.json');
+  await guard(() => api.saveManifest(root(), m), 'Could not save texwriter.json');
 }
 
-// ------------------------------------------------------------------ runs
-
-async function loadRunsCache() {
-  const runs = await api.listRuns(root());
-  setState({ runs });
-  const latest = runs.find((r) => r.status === 'completed');
-  const prev = runs.filter((r) => r.status === 'completed')[1];
-  for (const r of [latest, prev]) if (r) await getRun(r.number);
-  if (latest && state.selectedRun === null) setState({ selectedRun: latest.number });
-}
-
-export async function getRun(n: number): Promise<RunRecord | null> {
-  if (state.runCache[n]) return state.runCache[n];
-  const rec = await guard(() => api.loadRun(root(), n));
-  if (!rec) return null;
-  setState((s) => ({ runCache: { ...s.runCache, [n]: rec } }));
-  return rec;
-}
-
-export async function runTests() {
-  if (!state.project || state.running) return;
-  setState({ running: { done: 0, total: 0, label: 'Starting…', startedAt: Date.now(), log: [] } });
-  const meta = await guard(() => api.runTests(root()), 'Test run failed');
-  setState({ running: null });
-  await loadRunsCache();
-  if (!meta) return;
-  setState({ selectedRun: meta.number, selectedTest: null });
-  if (meta.status === 'completed') {
-    // first run: fill pending blocks immediately
-    const pend = Object.values(manifest().blocks).filter((b) => b.run === 0);
-    for (const b of pend) await refreshBlock(b.id, meta.number, false);
-    if (pend.length) await saveManifest({ ...manifest() });
-    await renderAllBlocks();
-    const c = meta.counts;
-    toast(`Run #${meta.number} finished: ${c.passed} passed, ${c.failed} failed, ${c.warning} warnings, ${c.skipped} skipped.`, c.failed ? 'err' : 'ok', state.view !== 'tests' ? { label: 'View results', run: () => setState({ view: 'tests' }) } : undefined);
-  } else if (meta.status === 'did-not-finish') {
-    toast(`Run #${meta.number} did not finish. ${meta.error ?? ''}`, 'err', { label: 'View run', run: () => setState({ view: 'tests' }) });
-  }
-}
-
-export function cancelRun() { void api.cancelRun(); }
-
-// ------------------------------------------------------------------ generated blocks
+// ------------------------------------------------------------------ generated tables and figures
 
 export function blockNode(id: string): JNode | undefined {
   return parsedMain().blocks.map((b) => b.node).find((n) => n.type === 'generatedBlock' && n.attrs?.id === id);
 }
 
-async function renderFor(cfg: GeneratedBlockConfig, runNo: number): Promise<{ tex: string; view: BlockView; hash: string } | { error: string }> {
-  if (cfg.dataFile) {
-    let text: string;
-    try { text = await api.readText(root(), cfg.dataFile); } catch { return { error: `${cfg.dataFile} was not found in the project` }; }
-    try { return renderDataTable(cfg, text); } catch (e) { return { error: (e as Error).message }; }
+type Rendered = { tex: string; view: BlockView; hash: string };
+
+/** Read a block's output and build its LaTeX (no writes). `pending`: the output does not exist yet. */
+async function renderFor(cfg: GeneratedBlockConfig): Promise<Rendered | { error: string; pending?: boolean }> {
+  if (cfg.kind === 'summary') return { error: 'Generated text from earlier versions is no longer supported. Convert this block to static LaTeX.' };
+  if (!cfg.output) return { error: 'Choose the file this block is built from.', pending: true };
+  const st = await api.statFile(root(), cfg.output);
+  if (!st) return { error: cfg.script ? `Not generated yet. Run ${cfg.script}.` : `Waiting for ${cfg.output}.`, pending: true };
+  let text: string | null = null;
+  if (cfg.kind === 'table') {
+    try { text = await api.readText(root(), cfg.output); } catch { return { error: `${cfg.output} could not be read.` }; }
   }
-  const rec = await getRun(runNo);
-  if (!rec) return { error: `Run #${runNo} not found` };
-  if (cfg.kind === 'summary') {
-    if (!rec.results) return { error: 'Run has no results' };
-    return renderSummary(cfg, rec.results, rec.meta);
-  }
-  if (!cfg.source) return { error: 'No source file selected' };
-  const rel = `runs/${runNo}/${cfg.source}`;
-  if (cfg.kind === 'figure') {
-    if (!rec.meta.outputs.includes(cfg.source)) return { error: `${cfg.source} was not produced by run #${runNo}` };
-    return renderFigure(cfg, rel, rec.meta);
-  }
-  let text: string;
-  try { text = await api.readText(root(), rel); } catch { return { error: `${cfg.source} was not produced by run #${runNo}` }; }
-  return renderTable(cfg, parseCsv(text), rec.meta);
+  try { return renderGenerated(cfg, text); } catch (e) { return { error: (e as Error).message }; }
 }
 
-/** Render the block from `runNo` (default: latest), write generated/<id>.tex and update the manifest entry. */
-export async function refreshBlock(id: string, runNo?: number, persist = true): Promise<boolean> {
+function setRender(id: string, r: BlockRender) {
+  setState((s) => ({ renders: { ...s.renders, [id]: r } }));
+}
+
+const statusAfterRun = (cfg: GeneratedBlockConfig): BlockRender['status'] => (cfg.lastRun && !cfg.lastRun.ok ? 'failed' : 'fresh');
+
+/**
+ * Rewrite generated/<id>.tex from the block's output file — or a labelled placeholder while
+ * there is none, so the document still compiles and \ref resolves. Unchanged files stay untouched.
+ */
+export async function refreshBlock(id: string, persist = true): Promise<boolean> {
   const m = manifest();
   const cfg = m.blocks[id];
   if (!cfg) return false;
-  const n = cfg.dataFile ? 0 : runNo ?? latestRun()?.number;
-  if (!n && !cfg.dataFile) { toast('Run the test suite first.', 'err'); return false; }
-  const r = await renderFor(cfg, n ?? 0);
-  if ('error' in r) {
-    setState((s) => ({ renders: { ...s.renders, [id]: { ...(s.renders[id] ?? { view: null }), status: 'missing', message: r.error } } }));
+  const r = await renderFor(cfg);
+  if ('error' in r && !r.pending) {
+    setRender(id, { view: null, status: 'missing', message: r.error });
     return false;
   }
-  // a data-linked table whose file and settings did not change keeps its file untouched
-  let same = false;
-  if (cfg.dataFile && cfg.renderedHash === r.hash) {
-    try { same = hash(await api.readText(root(), `generated/${id}.tex`)) === r.hash; } catch { /* missing: write it */ }
+  const tex = 'error' in r ? pendingTex(cfg) : r.tex;
+  const h = hash(tex);
+  let onDisk: string | null = null;
+  try { onDisk = await api.readText(root(), `generated/${id}.tex`); } catch { /* missing */ }
+  if (onDisk === null || hash(onDisk) !== h) await api.writeText(root(), `generated/${id}.tex`, tex);
+  if (cfg.renderedHash !== h || onDisk === null) {
+    m.blocks[id] = { ...cfg, renderedHash: h, ...('error' in r ? {} : { refreshedAt: new Date().toISOString() }) };
+    if (persist) await saveManifest({ ...m });
   }
-  if (same) {
-    setState((s) => ({ renders: { ...s.renders, [id]: { view: r.view, status: 'fresh', texHash: r.hash } } }));
-    return true;
-  }
-  await api.writeText(root(), `generated/${id}.tex`, r.tex);
-  m.blocks[id] = { ...cfg, run: n ?? 0, refreshedAt: new Date().toISOString(), renderedHash: r.hash };
-  if (persist) await saveManifest({ ...m });
-  setState((s) => ({ renders: { ...s.renders, [id]: { view: r.view, status: 'fresh', texHash: r.hash } } }));
+  if ('error' in r) { setRender(id, { view: null, status: 'pending', message: r.error }); return false; }
+  setRender(id, { view: r.view, status: statusAfterRun(cfg), message: cfg.lastRun?.error, texHash: r.hash });
   return true;
 }
 
-/** Rewrite the tables linked to a data file that just changed on disk. */
-async function refreshDataTables(rel: string) {
+/** Re-read every block's output (cheap; scripts are not run). */
+export async function refreshOutputs(): Promise<void> {
+  if (!state.project) return;
+  for (const cfg of Object.values(manifest().blocks)) {
+    const st = state.renders[cfg.id]?.status;
+    if (st !== 'conflict' && st !== 'edited') await refreshBlock(cfg.id, false);
+  }
+  await saveManifest({ ...manifest() });
+}
+
+/** Rewrite the blocks built from a file that just changed on disk. */
+async function refreshForOutput(rel: string) {
   let n = 0;
   for (const cfg of Object.values(manifest().blocks)) {
     const st = state.renders[cfg.id]?.status;
-    if (cfg.dataFile !== rel || st === 'conflict' || st === 'edited') continue;
-    if (await refreshBlock(cfg.id, undefined, false)) n++;
+    if (cfg.output !== rel || st === 'conflict' || st === 'edited') continue;
+    await refreshBlock(cfg.id, false);
+    n++;
   }
   if (n) await saveManifest({ ...manifest() });
 }
 
-export async function refreshStale(): Promise<number> {
-  const latest = latestRun()?.number ?? null;
-  let n = 0;
-  for (const cfg of Object.values(manifest().blocks)) {
-    const st = state.renders[cfg.id]?.status;
-    if (cfg.dataFile) {
-      // refreshBlock leaves an unchanged table alone; count only rewrites
-      if (st !== 'conflict' && st !== 'edited' && await refreshBlock(cfg.id, undefined, false) && manifest().blocks[cfg.id]?.renderedHash !== cfg.renderedHash) n++;
-      continue;
-    }
-    if (latest && cfg.followLatest && cfg.run !== latest && cfg.run !== 0 && state.renders[cfg.id]?.status !== 'conflict' && state.renders[cfg.id]?.status !== 'edited') {
-      if (await refreshBlock(cfg.id, latest, false)) n++;
-    }
-  }
-  if (n) await saveManifest({ ...manifest() });
-  return n;
-}
-
-/** Recompute views and statuses for every block (no writes). */
+/** Recompute views and statuses for every block; rewrite generated files whose output changed. */
 export async function renderAllBlocks() {
   if (!state.project) return;
-  const latest = latestRun()?.number ?? null;
   const out: Record<string, BlockRender> = {};
-  const dataChanged: string[] = [];
+  const changed: string[] = [];
   for (const cfg of Object.values(manifest().blocks)) {
     const node = blockNode(cfg.id);
-    const expectInner = `\\input{generated/${cfg.id}.tex}`;
-    if (node && (node.attrs?.inner ?? '').trim() !== expectInner) {
+    if (node && (node.attrs?.inner ?? '').trim() !== `\\input{generated/${cfg.id}.tex}`) {
       out[cfg.id] = { view: null, status: 'conflict', message: 'The LaTeX between the generated markers was edited by hand.' };
       continue;
     }
-    if (cfg.run === 0 && !cfg.dataFile) { out[cfg.id] = { view: null, status: 'pending', message: 'Pending first test run' }; continue; }
-    const r = await renderFor(cfg, cfg.run);
-    if ('error' in r) { out[cfg.id] = { view: null, status: 'missing', message: r.error }; continue; }
+    const r = await renderFor(cfg);
     let onDisk = '';
     try { onDisk = await api.readText(root(), `generated/${cfg.id}.tex`); } catch { /* missing */ }
-    if (onDisk && cfg.renderedHash && hash(onDisk) !== cfg.renderedHash && hash(onDisk) !== r.hash) {
-      out[cfg.id] = { view: r.view, status: 'edited', message: `generated/${cfg.id}.tex was edited outside Quire.` };
+    const want = 'error' in r ? (r.pending ? pendingTex(cfg) : null) : r.tex;
+    if (onDisk && cfg.renderedHash && hash(onDisk) !== cfg.renderedHash && (want === null || hash(onDisk) !== hash(want))) {
+      out[cfg.id] = { view: 'error' in r ? null : r.view, status: 'edited', message: `generated/${cfg.id}.tex was edited outside TeXWriter.` };
       continue;
     }
-    // the data file changed since the table was written: rewrite it
-    if (cfg.dataFile && (!onDisk || hash(onDisk) !== r.hash)) dataChanged.push(cfg.id);
-    out[cfg.id] = { view: r.view, status: cfg.dataFile ? 'fresh' : blockStatus(cfg, latest), texHash: r.hash };
+    if (want !== null && hash(onDisk) !== hash(want)) changed.push(cfg.id);
+    if ('error' in r) out[cfg.id] = { view: null, status: r.pending ? 'pending' : 'missing', message: r.error };
+    else out[cfg.id] = { view: r.view, status: statusAfterRun(cfg), message: cfg.lastRun?.error, texHash: r.hash };
   }
   setState({ renders: out });
-  if (dataChanged.length) {
-    for (const id of dataChanged) await refreshBlock(id, undefined, false);
+  if (changed.length) {
+    for (const id of changed) await refreshBlock(id, false);
     await saveManifest({ ...manifest() });
   }
+}
+
+/**
+ * Run the script paired with a block, then rebuild the block from what it wrote. Open files
+ * are saved first, so an edited script runs as shown.
+ */
+export async function runGenerator(id: string, opts: { quiet?: boolean; batch?: { done: number; total: number } } = {}): Promise<boolean> {
+  if (!state.project) return false;
+  const cfg = manifest().blocks[id];
+  if (!cfg?.script) { toast('This block has no script. Choose one in its properties.', 'err'); return false; }
+  if (state.generating && !opts.batch) return false;
+  await saveAll();
+  setState({ generating: { id, done: opts.batch?.done ?? 0, total: opts.batch?.total ?? 1, log: [] } });
+  const run = await guard(() => api.runGenerator(root(), id), 'Could not run the script');
+  if (!opts.batch) setState({ generating: null });
+  if (!run) return false;
+  const m = manifest();
+  m.blocks[id] = { ...m.blocks[id], lastRun: run };
+  await saveManifest({ ...m });
+  await refreshBlock(id);
+  await refreshFileList();
+  if (!run.ok && !opts.quiet) toast(`${cfg.label || id}: ${run.error}`, 'err', { label: 'Show log', run: () => showBlock(id) });
+  return run.ok;
+}
+
+let stopAll = false;
+
+/** Run every block that has a script, one after another. */
+export async function runAllGenerators(opts: { quiet?: boolean } = {}): Promise<{ ok: number; failed: number }> {
+  const res = { ok: 0, failed: 0 };
+  if (!state.project || state.generating) return res;
+  const ids = Object.values(manifest().blocks).filter((b) => b.script).map((b) => b.id);
+  if (!ids.length) {
+    if (!opts.quiet) toast('No generated tables or figures have a script yet. Add one with Insert → Generated table or Generated figure.');
+    return res;
+  }
+  stopAll = false;
+  for (let k = 0; k < ids.length && !stopAll; k++) {
+    if (await runGenerator(ids[k], { quiet: true, batch: { done: k, total: ids.length } })) res.ok++; else res.failed++;
+  }
+  setState({ generating: null });
+  if (!opts.quiet) {
+    if (res.failed) toast(`${res.failed} of ${ids.length} scripts failed. The Generated tab shows which, with their output.`, 'err', { label: 'Show', run: () => setState({ navOpen: true, navTab: 'generated' }) });
+    else toast(`Ran ${res.ok} script${res.ok === 1 ? '' : 's'}; the generated tables and figures are up to date.`, 'ok');
+  }
+  return res;
+}
+
+export function cancelGenerators() { stopAll = true; void api.cancelGenerator(); }
+
+/** Scroll to a block and open its properties (script, output and log). */
+export function showBlock(id: string) {
+  const idx = parsedMain().blocks.findIndex((b) => b.node.type === 'generatedBlock' && b.node.attrs?.id === id);
+  setState({ view: 'editor', panel: { open: true, tab: 'properties' }, focusBlock: { id, index: idx, nonce: Date.now() } });
 }
 
 export async function updateBlockConfig(id: string, patch: Partial<GeneratedBlockConfig>) {
   const m = manifest();
   m.blocks[id] = { ...m.blocks[id], ...patch };
   await saveManifest({ ...m });
-  if (m.blocks[id].dataFile) await refreshBlock(id);
-  else if (m.blocks[id].run > 0) await refreshBlock(id, m.blocks[id].run);
+  await refreshBlock(id);
   derive();
 }
 
-/** Keep the hand-edited LaTeX and stop tracking the block. */
+/** Keep the current LaTeX in the document and stop generating the block. */
 export async function unlinkBlock(id: string) {
   const p = parsedMain();
   const doc = toDocJson(p);
@@ -497,11 +495,10 @@ export async function unlinkBlock(id: string) {
   doc.content![idx] = { type: 'rawBlock', attrs: { latex: inner, label: 'Static copy', src: null, sig: null, gap: node.attrs?.gap ?? '\n\n' } };
   writeMainDoc(doc);
   const m = manifest();
-  const cfg = m.blocks[id];
   delete m.blocks[id];
   await saveManifest({ ...m });
   await renderAllBlocks();
-  toast(cfg?.dataFile ? `Converted to an editable table. It no longer follows ${cfg.dataFile}.` : 'Converted to static LaTeX. It no longer updates from test runs.');
+  toast('Converted to ordinary LaTeX. It is no longer regenerated.');
 }
 
 export async function restoreBlock(id: string) {
@@ -509,7 +506,10 @@ export async function restoreBlock(id: string) {
   const doc = toDocJson(p);
   const node = (doc.content ?? []).find((n) => n.type === 'generatedBlock' && n.attrs?.id === id);
   if (node) { node.attrs = { ...node.attrs, inner: `\\input{generated/${id}.tex}`, sig: null }; writeMainDoc(doc); }
-  await refreshBlock(id, manifest().blocks[id]?.run || undefined);
+  const m = manifest();
+  if (m.blocks[id]) { m.blocks[id] = { ...m.blocks[id], renderedHash: undefined }; await saveManifest({ ...m }); }
+  await api.writeText(root(), `generated/${id}.tex`, '');
+  await refreshBlock(id);
   await renderAllBlocks();
 }
 
@@ -532,20 +532,30 @@ export function insertBlockAt(node: JNode, after: number | null) {
 
 export function uniqueBlockId(base: string): string {
   const ids = new Set(Object.keys(manifest().blocks));
+  const files = new Set((state.project?.files ?? []).map((f) => f.path));
   const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 32) || 'block';
   let id = slug; let k = 2;
-  while (ids.has(id)) id = `${slug}_${k++}`;
+  while (ids.has(id) || files.has(`generated/${id}.tex`)) id = `${slug}_${k++}`;
   return id;
 }
 
-export async function createGeneratedBlock(cfg: GeneratedBlockConfig, after: number | null) {
+/**
+ * Add a generated table or figure to the document after top-level block `after`. With
+ * `starter`, a runnable example script is written first (never over an existing file).
+ */
+export async function createGeneratedBlock(cfg: GeneratedBlockConfig, after: number | null, opts: { starter?: ScriptLanguage; run?: boolean } = {}) {
+  if (opts.starter && cfg.script && cfg.output) {
+    const exists = await api.statFile(root(), cfg.script);
+    if (!exists) await api.writeText(root(), cfg.script, starterScript(cfg.kind === 'figure' ? 'figure' : 'table', opts.starter, cfg.output, cfg.label || cfg.id));
+  }
   const m = manifest();
   m.blocks[cfg.id] = cfg;
   await saveManifest({ ...m });
-  const ok = await refreshBlock(cfg.id, cfg.run);
-  if (!ok) return;
+  await refreshBlock(cfg.id);
   const at = insertBlockAt({ type: 'generatedBlock', attrs: { id: cfg.id, inner: `\\input{generated/${cfg.id}.tex}` } }, after);
   derive();
+  await refreshFileList();
+  if (opts.run && cfg.script) await runGenerator(cfg.id);
   return at;
 }
 
@@ -553,11 +563,9 @@ export async function createGeneratedBlock(cfg: GeneratedBlockConfig, after: num
 
 export async function compileNow() {
   if (!state.project || state.compiling) return;
+  if (manifest().generators.runBeforeCompile && !state.generating) await runAllGenerators({ quiet: true });
   setState({ compiling: { passes: [], startedAt: Date.now() } });
-  if (manifest().refreshBeforeCompile) {
-    const n = await refreshStale();
-    if (n) await renderAllBlocks();
-  }
+  await refreshOutputs();
   await saveAll();
   const result = await guard(() => api.compile(root()), 'Compile failed to start');
   setState((s) => ({ compiling: null, lastCompile: result ?? s.lastCompile, pdfVersion: s.pdfVersion + 1 }));
@@ -573,13 +581,13 @@ export function cancelCompile() { void api.cancelCompile(); }
 export function blockDiagnostics(): Diagnostic[] {
   const out: Diagnostic[] = [];
   if (!state.project) return out;
-  const latest = latestRun()?.number;
   for (const cfg of Object.values(manifest().blocks)) {
     const r = state.renders[cfg.id];
     const label = cfg.label ? `“${cfg.label}”` : cfg.id;
-    if (r?.status === 'stale' && latest) out.push({ id: `stale-${cfg.id}`, severity: 'notice', kind: 'stale-block', message: `Generated ${cfg.kind} ${label} is from run #${cfg.run}`, detail: `Run #${latest} is available.`, blockId: cfg.id });
+    if (r?.status === 'pending') out.push({ id: `pend-${cfg.id}`, severity: 'notice', kind: 'stale-block', message: `Generated ${cfg.kind} ${label} is not generated yet`, detail: r.message, blockId: cfg.id });
+    if (r?.status === 'failed') out.push({ id: `fail-${cfg.id}`, severity: 'warning', kind: 'stale-block', message: `The script for generated ${cfg.kind} ${label} failed`, detail: r.message, blockId: cfg.id });
     if (r?.status === 'conflict' || r?.status === 'edited') out.push({ id: `conf-${cfg.id}`, severity: 'warning', kind: 'block-conflict', message: `Generated ${cfg.kind} ${label} was edited by hand`, detail: r.message, blockId: cfg.id });
-    if (r?.status === 'missing') out.push({ id: `miss-${cfg.id}`, severity: 'warning', kind: 'missing-file', message: `Generated ${cfg.kind} ${label}: output missing`, detail: r.message, blockId: cfg.id });
+    if (r?.status === 'missing') out.push({ id: `miss-${cfg.id}`, severity: 'warning', kind: 'missing-file', message: `Generated ${cfg.kind} ${label}: ${r.message ?? 'output missing'}`, blockId: cfg.id });
   }
   return out;
 }
@@ -646,24 +654,24 @@ async function migrateSupportMacros() {
   const pre = state.project.files.find((f) => f.path === 'preamble.tex');
   if (!pre) return;
   const text = await openFile('preamble.tex');
-  if (text.includes(THEME_BEGIN) && !text.includes(SUPPORT_VERSION)) {
+  if (findThemeBlock(text) && !text.includes(SUPPORT_VERSION)) {
     setFileText('preamble.tex', applyThemeToPreamble(text, manifest().theme), 'app');
     await saveFile('preamble.tex');
   }
 }
 
-/** Main file emits \quirehl / \multirow but has no Quire preamble: add a small support block. */
+/** Main file emits \texwriterhl / \multirow but has no TeXWriter preamble: add a small support block. */
 export function ensureSupportInMain(tex: string): string {
-  if (!/\\quirehl\{|\\multirow\{|\\qnum\[/.test(tex)) return tex;
+  if (!/\\texwriterhl\{|\\multirow\{|\\qnum\[/.test(tex)) return tex;
   const pre = state.project?.files.some((f) => f.path === 'preamble.tex') && /\\input\{preamble(\.tex)?\}/.test(tex);
-  if (pre || tex.includes('quire:support begin') || /\\(newcommand|providecommand)\{?\\quirehl/.test(tex)) return tex;
+  if (pre || /(texwriter|quire):support begin/.test(tex) || /\\(newcommand|providecommand)\{?\\texwriterhl/.test(tex)) return tex;
   const at = tex.search(/\\begin\{document\}/);
   if (at < 0) return tex;
   const block = [
-    '% quire:support begin — macros used by the visual editor',
+    '% texwriter:support begin — macros used by the visual editor',
     '\\usepackage{xcolor}',
     ...SUPPORT_MACROS,
-    '% quire:support end',
+    '% texwriter:support end',
     '',
   ].join('\n');
   return tex.slice(0, at) + block + tex.slice(at);
@@ -671,7 +679,7 @@ export function ensureSupportInMain(tex: string): string {
 
 // ------------------------------------------------------------------ comments
 
-export const COMMENTS_FILE = 'quire-comments.json';
+export const COMMENTS_FILE = 'texwriter-comments.json';
 let commentsSaveTimer = 0;
 
 export async function loadComments() {

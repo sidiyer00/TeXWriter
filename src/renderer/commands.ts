@@ -3,7 +3,7 @@
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import type { Editor } from '@tiptap/react';
 import {
-  api, closeProject, compileNow, getState, guard, openContextMenu, runTests, saveAll, setState, toast, togglePanel, allDiagnostics, gotoSource, promptText, type MenuItem,
+  api, closeProject, compileNow, getState, guard, openContextMenu, runAllGenerators, saveAll, setState, toast, togglePanel, allDiagnostics, gotoSource, promptText, type MenuItem,
 } from './store';
 import { editorRef } from './visual/editorRef';
 import { sourceViewRef } from './components/SourceEditor';
@@ -20,7 +20,7 @@ export const SHORTCUTS: { group: string; items: Shortcut[] }[] = [
     { keys: 'Ctrl+S', action: 'Save all files (autosave is also on)' },
     { keys: 'Ctrl+O', action: 'Open a file in the project' },
     { keys: 'Ctrl+Enter', action: 'Compile the PDF' },
-    { keys: 'Ctrl+Shift+T', action: 'Run the test suite' },
+    { keys: 'Ctrl+Shift+G', action: 'Run the scripts of all generated tables and figures' },
     { keys: 'Ctrl+,', action: 'Settings' },
     { keys: 'F1', action: 'Keyboard shortcuts' },
     { keys: 'F8 / Shift+F8', action: 'Next / previous compile issue' },
@@ -221,7 +221,7 @@ export const fileMenu = (): MenuItem[] => {
   const p = !!getState().project;
   return [
     { label: 'New project…', run: () => { closeProject(); setState({ view: 'home' }); setTimeout(() => document.querySelector<HTMLButtonElement>('[data-new-project]')?.click(), 50); } },
-    { label: 'Open project folder…', run: async () => { const d = await api.chooseDirectory('Open a Quire project or a folder of LaTeX files'); if (d) { const { openProject } = await import('./store'); await openProject(d); } } },
+    { label: 'Open project folder…', run: async () => { const d = await api.chooseDirectory('Open a TeXWriter project or a folder of LaTeX files'); if (d) { const { openProject } = await import('./store'); await openProject(d); } } },
     { label: 'Open file in project…', shortcut: 'Ctrl+O', disabled: !p, run: () => setState({ quickOpen: true }) },
     { separator: true },
     { label: 'Save', shortcut: 'Ctrl+S', disabled: !p, run: () => void saveAll() },
@@ -273,7 +273,7 @@ export const viewMenu = (): MenuItem[] => {
     { label: 'Properties panel', shortcut: 'Ctrl+Alt+P', checked: s.panel.open && s.panel.tab === 'properties', run: () => togglePanel('properties') },
     { label: 'Comments', shortcut: 'Ctrl+Alt+C', checked: s.panel.open && s.panel.tab === 'comments', run: () => togglePanel('comments') },
     { separator: true },
-    { label: 'Test runs', disabled: !s.project, run: () => setState({ view: 'tests' }) },
+    { label: 'Generated tables and figures', disabled: !s.project, run: () => setState({ navOpen: true, navTab: 'generated' }) },
     { label: 'PDF review', disabled: !s.project, run: () => setState({ view: 'review' }) },
     { separator: true },
     { label: 'Zoom in', shortcut: 'Ctrl+=', run: () => zoomBy(0.1) },
@@ -286,7 +286,7 @@ export const runMenu = (): MenuItem[] => {
   const p = !!getState().project;
   return [
     { label: 'Compile', shortcut: 'Ctrl+Enter', disabled: !p, run: () => void compileNow() },
-    { label: 'Run tests', shortcut: 'Ctrl+Shift+T', disabled: !p || !getState().project?.manifest.tests.command, run: () => void runTests() },
+    { label: 'Run all scripts', shortcut: 'Ctrl+Shift+G', disabled: !p, run: () => void runAllGenerators() },
     { separator: true },
     { label: 'Next issue', shortcut: 'F8', disabled: !p, run: () => nextIssue(1) },
     { label: 'Previous issue', shortcut: 'Shift+F8', disabled: !p, run: () => nextIssue(-1) },
@@ -297,7 +297,7 @@ export const helpMenu = (): MenuItem[] => [
   { label: 'Keyboard shortcuts', shortcut: 'F1', run: () => setState({ dialog: 'shortcuts' }) },
   { label: 'Check LaTeX and Python tools', run: () => setState({ view: 'settings' }) },
   { separator: true },
-  { label: 'About Quire', run: () => setState({ dialog: 'about' }) },
+  { label: 'About TeXWriter', run: () => setState({ dialog: 'about' }) },
 ];
 
 export { openContextMenu };
@@ -325,7 +325,9 @@ export const insertMenu = (): MenuItem[] => {
     { label: 'Equation', shortcut: 'Ctrl+Shift+M', disabled: !ok, run: insertEquation },
     { label: 'Inline math', shortcut: 'Ctrl+M', disabled: !ok, run: insertInlineMath },
     { label: 'Table…', shortcut: 'Ctrl+Alt+T', disabled: !ok, run: () => setState({ dialog: 'insertTable' }) },
-    { label: 'Table from data file (CSV)…', disabled: !ok, run: () => setState({ dialog: 'dataTable', dataTableFile: null }) },
+    { label: 'Generated table…', disabled: !ok, run: () => setState({ dialog: 'generated', generatedInit: { kind: 'table', mode: 'new' } }) },
+    { label: 'Generated figure…', disabled: !ok, run: () => setState({ dialog: 'generated', generatedInit: { kind: 'figure', mode: 'new' } }) },
+    { label: 'Table from data file (CSV)…', disabled: !ok, run: () => setState({ dialog: 'generated', generatedInit: { kind: 'table', mode: 'file' } }) },
     { label: 'Figure…', disabled: !ok, run: () => void insertFigure() },
     { separator: true },
     { label: 'Citation…', shortcut: 'Ctrl+Shift+K', disabled: !ok, run: () => setState({ picker: 'cite' }) },
@@ -338,7 +340,5 @@ export const insertMenu = (): MenuItem[] => {
     { label: 'Callout', disabled: !ok, run: () => { const e = ed(); if (e) insertBlock(e, { type: 'calloutBlock', attrs: { title: 'Finding F-0X · Severity: Medium' }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Describe the finding.' }] }] }); } },
     { label: 'Page break', disabled: !ok, run: () => { const e = ed(); if (e) insertBlock(e, { type: 'pageBreak', attrs: { cmd: 'clearpage' } }); } },
     { label: 'Raw LaTeX block', disabled: !ok, run: () => { const e = ed(); if (e) insertBlock(e, { type: 'rawBlock', attrs: { label: 'LaTeX', latex: '% your LaTeX here' } }); } },
-    { separator: true },
-    { label: 'Test result…', disabled: !getState().project, run: () => setState({ view: 'tests' }) },
   ];
 };

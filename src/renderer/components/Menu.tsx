@@ -105,10 +105,10 @@ export function ContextMenu() {
   let items = cm.items;
   // spelling suggestions arrive from the main process right after the right-click
   if (spell && spell.word && Date.now() - spell.at < 3000 && items.some((i) => i.label === 'Cut')) {
-    const sug: MenuItem[] = spell.suggestions.slice(0, 5).map((w) => ({ label: w, run: () => void window.quire.replaceMisspelling(w) }));
+    const sug: MenuItem[] = spell.suggestions.slice(0, 5).map((w) => ({ label: w, run: () => void window.texwriter.replaceMisspelling(w) }));
     items = [
       ...(sug.length ? sug : [{ label: 'No spelling suggestions', disabled: true }]),
-      { label: `Add “${spell.word}” to dictionary`, run: () => void window.quire.addToDictionary(spell.word) },
+      { label: `Add “${spell.word}” to dictionary`, run: () => void window.texwriter.addToDictionary(spell.word) },
       { separator: true },
       ...items,
     ];

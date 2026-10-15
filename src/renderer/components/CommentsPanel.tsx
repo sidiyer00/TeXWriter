@@ -129,7 +129,7 @@ export function CommentsPanel() {
         {!draft && list.length === 0 && (
           <div className="empty small">
             <b>{filter === 'resolved' ? 'No resolved comments' : 'No comments yet'}</b>
-            <span className="muted">Select text in the document and press Ctrl+Alt+M, or right-click → New comment. Comments are saved in quire-comments.json inside the project, so anyone you share the project with sees them.</span>
+            <span className="muted">Select text in the document and press Ctrl+Alt+M, or right-click → New comment. Comments are saved in texwriter-comments.json inside the project, so anyone you share the project with sees them.</span>
           </div>
         )}
         {list.map((t) => <Thread key={t.id} t={t} active={t.id === active} located={!!ranges?.has(t.id) || t.resolved} />)}

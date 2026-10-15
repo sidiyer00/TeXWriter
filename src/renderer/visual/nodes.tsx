@@ -13,11 +13,11 @@ import { useEffect, useRef, useState, type ReactElement } from 'react';
 import type { TableView } from '../../shared/generate';
 import { numberDocument, refDisplay, shortAuthor } from '../../shared/latex/refs';
 import type { JNode } from '../../shared/latex/model';
-import { getState, useStore, refreshBlock, gotoSource, mainFile, mainBlockLines, api, setState, latestRun, openTab } from '../store';
+import { getState, useStore, gotoSource, mainFile, mainBlockLines, api, setState, openTab, runGenerator, showBlock, unlinkBlock } from '../store';
 import { Refresh, Link } from '../components/Icons';
 import { loadPdfCached, renderPage } from '../pdf';
 import { parseInline } from '../../shared/latex/inline';
-import { TextColor, QuireHighlight } from './marks';
+import { TextColor, TeXWriterHighlight } from './marks';
 import { TableBlock, QTable, QTableRow, QTableHeader, QTableCell } from './table';
 import { SpreadsheetClipboard } from './clipboard';
 import { Find } from './find';
@@ -43,8 +43,8 @@ export const BlockMeta = Extension.create({
 
 // ---------------------------------------------------------------- numbering
 
-export const numberingKey = new PluginKey<DecorationSet>('quire-numbering');
-export const syncKey = new PluginKey<number | null>('quire-sync');
+export const numberingKey = new PluginKey<DecorationSet>('texwriter-numbering');
+export const syncKey = new PluginKey<number | null>('texwriter-sync');
 
 function numberDecorations(doc: any): DecorationSet {
   const json = doc.toJSON() as JNode;
@@ -183,25 +183,26 @@ function MathBlockView(props: ReactNodeViewProps) {
 
 // ---------------------------------------------------------------- figures & assets
 
-export function AssetPreview({ path, maxWidth }: { path: string; maxWidth?: number }) {
+/** `version` changes when the file is rewritten (a regenerated figure), so the preview reloads. */
+export function AssetPreview({ path, maxWidth, version }: { path: string; maxWidth?: number; version?: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [err, setErr] = useState<string | null>(null);
   const r = getState().project?.root ?? '';
   const isPdf = /\.pdf$/i.test(path);
   const files = useStore((s) => s.project?.files);
-  const known = !!files?.some((f) => f.path === path) || path.startsWith('runs/');
+  const known = !!files?.some((f) => f.path === path) || !!version;
   useEffect(() => {
     if (!isPdf || !ref.current) return;
     let cancelled = false;
-    loadPdfCached(`${r}|${path}`, () => api.readBinary(r, path))
+    loadPdfCached(`${r}|${path}|${version ?? ''}`, () => api.readBinary(r, path))
       .then(async (doc) => { if (cancelled || !ref.current) return; const page = await doc.getPage(1); const w = page.getViewport({ scale: 1 }).width; await renderPage(doc, 1, ref.current, Math.min(1.6, (maxWidth ?? 560) / w)); })
       .catch((e) => !cancelled && setErr(String(e?.message ?? e)));
     return () => { cancelled = true; };
-  }, [path, r, isPdf, maxWidth]);
+  }, [path, r, isPdf, maxWidth, version]);
   if (!path) return <div className="placeholder-box">No file chosen</div>;
   if (err || (!known && !isPdf && !/\.(png|jpe?g|gif|svg)$/i.test(path))) return <div className="placeholder-box">{err ? `Cannot preview ${path}` : `${path} — preview after compile`}</div>;
   if (isPdf) return <div className="figbox"><canvas ref={ref} /></div>;
-  return <div className="figbox"><img src={api.fileUrl(r, path)} alt="" onError={() => setErr('missing')} style={{ maxWidth: maxWidth ?? 560 }} /></div>;
+  return <div className="figbox"><img src={`${api.fileUrl(r, path)}${version ? `&v=${encodeURIComponent(version)}` : ''}`} alt="" onError={() => setErr('missing')} style={{ maxWidth: maxWidth ?? 560 }} /></div>;
 }
 
 function captionText(latex: string): string {
@@ -276,54 +277,65 @@ function GeneratedBlockView(props: ReactNodeViewProps) {
   const id: string = props.node.attrs.id;
   const cfg = useStore((s) => s.project?.manifest.blocks[id]);
   const render = useStore((s) => s.renders[id]);
-  const latest = useStore(() => latestRun()?.number ?? null);
+  const gen = useStore((s) => s.generating);
   const num = numFrom(props);
-  const [busy, setBusy] = useState(false);
   if (!cfg) {
     return (
       <NodeViewWrapper className="blk blk-gen missing" data-drag-handle="">
         <span className="blk-tag">Unknown generated block “{id}”</span>
-        <div className="small" style={{ fontFamily: 'var(--ui)' }}>No entry for this id in quire.json. <button className="btn btn-xs" onClick={() => jumpToBlockSource(props)}>View source</button></div>
+        <div className="small" style={{ fontFamily: 'var(--ui)' }}>No entry for this id in texwriter.json. <button className="btn btn-xs" onClick={() => jumpToBlockSource(props)}>View source</button></div>
       </NodeViewWrapper>
     );
   }
   const st = render?.status ?? 'pending';
-  const data = cfg.dataFile;
-  const tag = data && (st === 'fresh' || st === 'stale') ? `Linked to ${data} · updated ${ago(cfg.refreshedAt)}`
-    : st === 'fresh' ? `Generated · run #${cfg.run} · ${ago(cfg.refreshedAt)}`
-    : st === 'stale' ? `Stale · from run #${cfg.run} · run #${latest} available`
-    : st === 'pending' ? 'Generated · pending first test run'
+  const running = gen?.id === id;
+  const from = cfg.script ?? cfg.output ?? 'no source';
+  const tag = running ? `Running ${cfg.script}…`
+    : st === 'fresh' ? `Generated · ${from} · ${ago(cfg.lastRun?.at ?? cfg.refreshedAt)}`
+    : st === 'pending' ? `Not generated yet · ${from}`
+    : st === 'failed' ? `Last run failed · ${cfg.script}`
     : st === 'conflict' ? 'Edited in source · not linked'
-    : st === 'edited' ? 'Generated file edited outside Quire'
-    : `Output missing · ${render?.message ?? ''}`;
+    : st === 'edited' ? 'Generated file edited outside TeXWriter'
+    : `Can't build · ${render?.message ?? ''}`;
   const view = render?.view;
-  const doRefresh = async (e: React.MouseEvent) => { e.stopPropagation(); setBusy(true); await refreshBlock(id); setBusy(false); };
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+  const run = (e: React.MouseEvent) => { stop(e); void runGenerator(id); };
+  const props_ = (e: React.MouseEvent) => { stop(e); showBlock(id); };
+  const placeholder = (what: string) => (
+    <div className="placeholder-box">
+      {running ? <span className="mono small">{gen?.log[gen.log.length - 1] ?? 'Starting…'}</span>
+        : st === 'pending' ? <>{cfg.script ? <>Run <span className="mono">{cfg.script}</span> to {what}.</> : <>Waiting for <span className="mono">{cfg.output}</span>.</>}</>
+        : render?.message}
+      {cfg.script && !running && st !== 'conflict' && <div style={{ marginTop: 8 }}><button className="btn btn-sm btn-pri" onClick={run} disabled={!!gen}><Refresh />Run {cfg.script.split('/').pop()}</button></div>}
+    </div>
+  );
   return (
     <NodeViewWrapper className={`blk blk-gen ${st}`} data-drag-handle="">
-      <span className="blk-tag"><Link size={11} />{busy ? 'Refreshing…' : tag}</span>
+      <span className="blk-tag"><Link size={11} />{tag}</span>
       <div className="blk-actions" contentEditable={false}>
-        {(st === 'stale' || st === 'fresh' || st === 'missing') && <button className="tb" onClick={doRefresh}><Refresh />Refresh</button>}
-        {data
-          ? <button className="tb" onClick={(e) => { e.stopPropagation(); void openTab(data); }}>Open data</button>
-          : <button className="tb" onClick={(e) => { e.stopPropagation(); setState({ view: 'tests', selectedRun: cfg.run || getState().selectedRun, selectedTest: cfg.testIds[0] ?? null }); }}>Open run</button>}
-        <button className="tb" onClick={(e) => { e.stopPropagation(); jumpToBlockSource(props); }}>View source</button>
+        {cfg.script && <button className="tb" disabled={!!gen} onClick={run}><Refresh />{running ? 'Running…' : 'Run'}</button>}
+        {cfg.script && <button className="tb" onClick={(e) => { stop(e); void openTab(cfg.script!); }}>Edit script</button>}
+        {!cfg.script && cfg.output && cfg.kind === 'table' && <button className="tb" onClick={(e) => { stop(e); void openTab(cfg.output!); }}>Open data</button>}
+        <button className="tb" onClick={props_}>Properties</button>
+        <button className="tb" onClick={(e) => { stop(e); jumpToBlockSource(props); }}>View source</button>
       </div>
+      {st === 'failed' && cfg.lastRun && <div className="gen-error small" onClick={props_} role="button" tabIndex={0}>{cfg.lastRun.error} <u>Show output</u></div>}
       {cfg.kind === 'table' && (
         <>
           <div className="cap"><b>Table {num ?? ''}</b><RichInline latex={cfg.caption ?? ''} /></div>
-          {view?.kind === 'table' ? <div style={{ overflowX: 'auto' }}><TablePreview view={view} /></div> : <div className="placeholder-box">{st === 'pending' ? 'Run the test suite to fill this table.' : render?.message}</div>}
-          {view?.kind === 'table' && (data ? !!cfg.sourceLine : cfg.sourceLine !== false) && <div className="srcline">Source: {view.sourceLine}.</div>}
+          {view?.kind === 'table'
+            ? (view.latex ? <pre className="rawsrc">{view.latex.split('\n').slice(0, 14).join('\n')}</pre> : <div style={{ overflowX: 'auto' }}><TablePreview view={view} /></div>)
+            : placeholder('fill this table')}
+          {view?.kind === 'table' && cfg.sourceLine && <div className="srcline">Source: {view.sourceLine}.</div>}
         </>
-      )}
-      {cfg.kind === 'summary' && (
-        <p style={{ margin: 0 }}>{view?.kind === 'summary' ? <RichInline latex={view.text} /> : <i>Pending first test run — this summary is filled in from the results.</i>}</p>
       )}
       {cfg.kind === 'figure' && (
         <>
-          {view?.kind === 'figure' ? <AssetPreview path={view.path} /> : <div className="placeholder-box">{st === 'pending' ? 'Run the test suite to draw this figure.' : render?.message}</div>}
+          {view?.kind === 'figure' ? <AssetPreview path={view.path} version={cfg.lastRun?.at ?? cfg.refreshedAt} /> : placeholder('draw this figure')}
           <div className="cap" style={{ textAlign: 'center' }}><b>Figure {num ?? ''}</b><RichInline latex={cfg.caption ?? ''} /></div>
         </>
       )}
+      {cfg.kind === 'summary' && <div className="placeholder-box">{render?.message} <button className="btn btn-xs" onClick={(e) => { stop(e); void unlinkBlock(id); }}>Convert to static LaTeX</button></div>}
     </NodeViewWrapper>
   );
 }
@@ -427,9 +439,9 @@ export const CalloutBlock = Node.create({
   group: 'block',
   content: 'paragraph+',
   defining: true,
-  addAttributes() { return { title: { default: 'Note', rendered: false } }; },
-  parseHTML() { return [{ tag: 'div[data-qtype="calloutBlock"]', getAttrs: (el) => ({ title: (el as HTMLElement).dataset.title ?? 'Note' }) }]; },
-  renderHTML({ node }) { return ['div', { 'data-qtype': 'calloutBlock', 'data-title': node.attrs.title }, 0]; },
+  addAttributes() { return { title: { default: 'Note', rendered: false }, env: { default: 'texwritercallout', rendered: false } }; },
+  parseHTML() { return [{ tag: 'div[data-qtype="calloutBlock"]', getAttrs: (el) => ({ title: (el as HTMLElement).dataset.title ?? 'Note', env: (el as HTMLElement).dataset.env ?? 'texwritercallout' }) }]; },
+  renderHTML({ node }) { return ['div', { 'data-qtype': 'calloutBlock', 'data-title': node.attrs.title, 'data-env': node.attrs.env }, 0]; },
   addNodeView() { return ReactNodeViewRenderer(CalloutView); },
 });
 
@@ -533,7 +545,7 @@ export function extensions() {
     StarterKit.configure({ heading: false, codeBlock: false, blockquote: false, horizontalRule: false, strike: false, link: { openOnClick: false, autolink: true, linkOnPaste: true, HTMLAttributes: { rel: null, target: null, class: 'qlink' } } }),
     QHeading,
     QCodeBlock,
-    TextColor, QuireHighlight,
+    TextColor, TeXWriterHighlight,
     TableBlock, QTable, QTableRow, QTableHeader, QTableCell,
     BlockMeta,
     Numbering,

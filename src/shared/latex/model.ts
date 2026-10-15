@@ -40,7 +40,7 @@ export const BLOCK_TYPES = [
 export type BlockType = (typeof BLOCK_TYPES)[number];
 
 export const INLINE_COMMANDS = new Set([
-  'textbf', 'textit', 'emph', 'texttt', 'textsc', 'textrm', 'textsf', 'underline', 'uline', 'textcolor', 'quirehl',
+  'textbf', 'textit', 'emph', 'texttt', 'textsc', 'textrm', 'textsf', 'underline', 'uline', 'textcolor', 'texwriterhl', 'quirehl',
   'cite', 'citep', 'citet', 'citealp', 'citeauthor', 'citeyear', 'parencite', 'textcite', 'autocite',
   'ref', 'eqref', 'autoref', 'cref', 'Cref', 'pageref', 'nameref',
   'footnote', 'url', 'href', 'ldots', 'dots', 'LaTeX', 'TeX', 'today', 'S', 'P',

@@ -1,38 +1,47 @@
 // The built-in templates as the Home screen and New project dialog list them.
-import type { ReportType } from './types';
-
-export type TemplateGroup = 'Model risk' | 'Academic' | 'General';
+import type { AcademicFormat, ReportType } from './types';
 
 export interface TemplateInfo {
   type: ReportType;
   title: string;
   /** short label for project lists */
   short: string;
-  group: TemplateGroup;
   text: string;
   /** thumbnail sketch: bar heights (≤2 = text line, larger = a box) */
   bars: number[];
-  /** offer the sample Python validation suite by default */
-  suite: boolean;
 }
 
 export const TEMPLATES: TemplateInfo[] = [
-  { type: 'validation', title: 'Validation report', short: 'Validation', group: 'Model risk', text: 'Scope, testing, findings, sign-off · 7 sections', bars: [1, 1, 8, 1], suite: true },
-  { type: 'documentation', title: 'Model documentation', short: 'Model documentation', group: 'Model risk', text: 'Purpose, data, methodology, limitations · 8 sections', bars: [1, 1, 1, 1, 1], suite: true },
-  { type: 'monitoring', title: 'Ongoing monitoring', short: 'Monitoring', group: 'Model risk', text: 'KPI results against thresholds · 3 sections', bars: [10, 1, 1], suite: true },
-  { type: 'performance', title: 'Performance review', short: 'Performance review', group: 'Model risk', text: 'Discrimination, calibration, backtesting · 6 sections', bars: [1, 14, 1], suite: true },
-  { type: 'article', title: 'Journal article', short: 'Journal article', group: 'Academic', text: 'Abstract, IMRaD sections, author–year citations', bars: [6, 1, 1, 1, 1], suite: false },
-  { type: 'conference', title: 'Conference paper', short: 'Conference paper', group: 'Academic', text: 'Two columns, 10 pt, numbered references (IEEE/ACM-like)', bars: [1, 1, 5, 1, 1], suite: false },
-  { type: 'working', title: 'Working paper', short: 'Working paper', group: 'Academic', text: 'Economics/finance: abstract, JEL codes, robustness, appendix', bars: [6, 1, 1, 9, 1], suite: false },
-  { type: 'thesis', title: 'Thesis or dissertation', short: 'Thesis', group: 'Academic', text: 'Title page, front matter, chapters, appendices · 12 pt, one-and-a-half spacing', bars: [12, 1, 1, 1], suite: false },
-  { type: 'apa', title: 'APA 7 paper', short: 'APA paper', group: 'Academic', text: 'Double-spaced, 12 pt, Method / Results / Discussion', bars: [1, 1, 1, 1, 1, 1], suite: false },
-  { type: 'proposal', title: 'Research proposal', short: 'Proposal', group: 'Academic', text: 'Aims, significance, approach, timeline, budget', bars: [1, 7, 1, 1], suite: false },
-  { type: 'techreport', title: 'Technical report', short: 'Technical report', group: 'General', text: 'Executive summary, contents, recommendations, appendix', bars: [1, 1, 1, 6], suite: false },
-  { type: 'blank', title: 'Blank LaTeX project', short: 'LaTeX', group: 'General', text: 'Bring your own class and preamble', bars: [], suite: false },
+  { type: 'documentation', title: 'Model documentation', short: 'Model documentation', text: 'Purpose, data, methodology, performance, limitations, monitoring plan', bars: [1, 1, 8, 1, 1] },
+  { type: 'monitoring', title: 'Ongoing monitoring report', short: 'Monitoring report', text: 'Metrics against thresholds, population changes, breaches and actions', bars: [10, 1, 1] },
+  { type: 'academic', title: 'Academic paper', short: 'Academic paper', text: 'IEEE, ACM, Elsevier, Springer LNCS, APS, AMS, APA 7 or a plain article', bars: [6, 1, 1, 1, 1] },
+  { type: 'blank', title: 'Blank document', short: 'LaTeX', text: 'A title and one section; bring your own structure', bars: [] },
 ];
 
-export const TEMPLATE_GROUPS: TemplateGroup[] = ['Model risk', 'Academic', 'General'];
+export interface AcademicFormatInfo {
+  id: AcademicFormat;
+  title: string;
+  /** document class (all on CTAN; MiKTeX installs them on first use) */
+  cls: string;
+  text: string;
+}
 
-export function templateInfo(t: ReportType): TemplateInfo {
+export const ACADEMIC_FORMATS: AcademicFormatInfo[] = [
+  { id: 'ieee-conf', title: 'IEEE conference paper', cls: 'IEEEtran', text: 'Two columns, IEEE author blocks, IEEEkeywords, IEEEtran references' },
+  { id: 'ieee-journal', title: 'IEEE journal article (Transactions)', cls: 'IEEEtran', text: 'Two columns, membership and footnote author notes, running heads' },
+  { id: 'acm', title: 'ACM conference paper (sigconf)', cls: 'acmart', text: 'ACM rights block, CCS concepts, keywords, ACM-Reference-Format' },
+  { id: 'elsevier', title: 'Elsevier journal (preprint)', cls: 'elsarticle', text: 'Front matter with affiliations and keywords, numbered references' },
+  { id: 'springer-lncs', title: 'Springer LNCS proceedings', cls: 'llncs', text: 'Institutes, ORCID, keywords in the abstract, splncs04 references' },
+  { id: 'aps', title: 'APS Physical Review (REVTeX)', cls: 'revtex4-2', text: 'Two-column reprint layout, superscript affiliations, apsrev references' },
+  { id: 'ams', title: 'AMS journal article', cls: 'amsart', text: 'Address, MSC subject classes, theorem environments, amsplain references' },
+  { id: 'apa7', title: 'APA 7 manuscript', cls: 'apa7', text: 'Title page, running head, abstract and keywords, apacite author–year references' },
+  { id: 'article', title: 'Plain article (no journal)', cls: 'article', text: 'Working paper or preprint; page layout set in Document setup' },
+];
+
+export function templateInfo(t: ReportType | string): TemplateInfo {
   return TEMPLATES.find((x) => x.type === t) ?? TEMPLATES[TEMPLATES.length - 1];
+}
+
+export function academicFormatInfo(f: AcademicFormat | string | undefined): AcademicFormatInfo {
+  return ACADEMIC_FORMATS.find((x) => x.id === f) ?? ACADEMIC_FORMATS[ACADEMIC_FORMATS.length - 1];
 }

@@ -1,9 +1,9 @@
 // Types shared by the main process, preload bridge and renderer.
 
-export type ReportType =
-  | 'validation' | 'documentation' | 'monitoring' | 'performance'
-  | 'article' | 'conference' | 'thesis' | 'apa' | 'working' | 'proposal' | 'techreport'
-  | 'blank';
+export type ReportType = 'documentation' | 'monitoring' | 'academic' | 'blank';
+
+/** Journal/publisher formats for academic papers; each uses the publisher's own class. */
+export type AcademicFormat = 'ieee-conf' | 'ieee-journal' | 'acm' | 'elsevier' | 'springer-lncs' | 'aps' | 'ams' | 'apa7' | 'article';
 
 /**
  * A template the user saved (File → Save as template, Document setup → Save style, or a
@@ -29,7 +29,6 @@ export interface UserTemplate {
 
 export type UserTemplateInput = Omit<UserTemplate, 'id' | 'createdAt'> & { id?: string };
 export type Engine = 'pdflatex' | 'lualatex' | 'xelatex';
-export type TestStatus = 'passed' | 'failed' | 'warning' | 'skipped';
 
 export interface ThemeSettings {
   preset: 'classic' | 'editorial' | 'compact' | 'custom';
@@ -49,117 +48,91 @@ export interface ThemeSettings {
   printLinksBlack: boolean;
   headerLeft: string;
   headerRight: string;
+  /** a journal/publisher class owns the layout: Document setup manages only the editor's macros */
+  classLayout?: boolean;
 }
 
-export type BlockKind = 'table' | 'summary' | 'figure';
+export type BlockKind = 'table' | 'figure';
 
+/** One execution of a generated block's script. */
+export interface GeneratorRun {
+  at: string;
+  ok: boolean;
+  exitCode: number | null;
+  durationMs: number;
+  command: string;
+  /** stdout and stderr (truncated), plus TeXWriter's own messages */
+  log: string;
+  error?: string;
+}
+
+/**
+ * A generated table or figure: LaTeX that TeXWriter writes to generated/<id>.tex from an
+ * output file (CSV/TSV/.tex for tables; PDF/PNG/JPG for figures). The output file either
+ * comes from a script paired with the block, or is a file you or another program update
+ * (a model's output). The document holds `\input{generated/<id>.tex}` between markers.
+ */
 export interface GeneratedBlockConfig {
   id: string;
-  kind: BlockKind;
-  /** run number the block was last rendered from */
-  run: number;
-  /** follow the newest run (true) or stay pinned to `run` */
-  followLatest: boolean;
-  /** path relative to the run directory, e.g. outputs/calibration_by_grade.csv */
-  source?: string;
-  /** tests whose values feed the block */
-  testIds: string[];
+  /** 'summary' only appears in projects made by earlier versions (no longer generated) */
+  kind: BlockKind | 'summary';
+  /** project-relative script that writes `output`; unset = the output is updated outside TeXWriter */
+  script?: string;
+  /** command line; default from the script's extension. {python}, {script}, {output} are filled in */
+  command?: string;
+  /** project-relative file the block is built from */
+  output?: string;
   caption?: string;
   label?: string;
   // table options
-  columns?: string[];
-  columnLabels?: Record<string, string>;
-  hiddenColumns?: string[];
-  decimals?: number;
-  percentColumns?: string[];
-  highlight?: { column: string; equals: string } | null;
-  totalRow?: boolean;
-  sourceLine?: boolean;
-  fitWidth?: boolean;
-  style?: 'booktabs' | 'grid' | 'minimal';
-  // tables linked to a data file in the project (CSV/TSV) instead of a test run
-  /** project-relative data file, e.g. data/grades.csv; set = the block follows this file, not a run */
-  dataFile?: string;
-  /** header rows at the top of the file (undefined = detect); merged labels become multi-level headers */
+  /** header rows at the top of the output (undefined = detect); merged labels become multi-level headers */
   headerRows?: number;
-  /** any table style from the editor (booktabs, striped, lines, minimal, boxed, grid, plain) */
+  /** booktabs, striped, lines, minimal, boxed, grid, plain */
   tableStyle?: string;
   /** number format for numeric body cells (numfmt encoding, e.g. "num,d2,sep"); unset = as written */
   numberFormat?: string;
   /** \small, \footnotesize, … */
   size?: string;
-  // summary options
-  template?: string;
+  columns?: string[];
+  columnLabels?: Record<string, string>;
+  hiddenColumns?: string[];
+  fitWidth?: boolean;
+  /** print the output file name under the table/figure */
+  sourceLine?: boolean;
   // figure options
   width?: string;
+  lastRun?: GeneratorRun;
   refreshedAt?: string;
   /** hash of the rendered .tex, used to detect hand edits */
   renderedHash?: string;
+  // fields written by earlier versions (test runs); read only to migrate
+  run?: number;
+  source?: string;
+  dataFile?: string;
+  template?: string;
 }
 
-export interface TestsConfig {
-  /** shell command; {python} and {runDir} are substituted */
-  command: string;
+export interface GeneratorSettings {
+  /** Python interpreter; empty = auto-detected */
   python?: string;
-  cwd?: string;
-  suiteName?: string;
+  /** run every script before each compile (otherwise outputs are only re-read) */
+  runBeforeCompile: boolean;
+  /** stop a script after this many seconds */
+  timeoutSec: number;
 }
 
 export interface ProjectManifest {
   version: 1;
   name: string;
   reportType: ReportType;
-  modelId?: string;
+  academicFormat?: AcademicFormat;
   owner?: string;
-  dueDate?: string;
   mainFile: string;
   engine: Engine;
-  tests: TestsConfig;
+  generators: GeneratorSettings;
   blocks: Record<string, GeneratedBlockConfig>;
-  refreshBeforeCompile: boolean;
   theme: ThemeSettings;
 }
-
-export interface TestResult {
-  id: string;
-  name: string;
-  category: string;
-  status: TestStatus;
-  metric?: string;
-  value?: number | string | null;
-  threshold?: string;
-  notes?: string;
-  outputs?: string[];
-  details?: Record<string, number | string>;
-  finishedAt?: string;
-  /** history of the value in previous runs, filled in by compare() */
-}
-
-export interface RunResults {
-  suite: string;
-  dataSnapshot?: string;
-  tests: TestResult[];
-}
-
-export interface RunCounts { passed: number; failed: number; warning: number; skipped: number; total: number }
-
-export interface RunMeta {
-  number: number;
-  suite: string;
-  status: 'completed' | 'did-not-finish' | 'cancelled' | 'running';
-  startedAt: string;
-  finishedAt?: string;
-  durationMs?: number;
-  exitCode?: number | null;
-  command: string;
-  gitCommit?: string | null;
-  dataSnapshot?: string;
-  counts: RunCounts;
-  error?: string;
-  outputs: string[];
-}
-
-export interface RunRecord { meta: RunMeta; results: RunResults | null }
 
 export type DiagnosticSeverity = 'error' | 'warning' | 'notice';
 export type DiagnosticKind =
@@ -211,16 +184,13 @@ export interface OpenProject {
   manifest: ProjectManifest;
   state: ProjectState;
   files: ProjectFile[];
-  runs: RunMeta[];
 }
 
 export interface RecentProject {
   root: string;
   name: string;
   reportType: ReportType;
-  modelId?: string;
   lastOpened: string;
-  lastRun?: { number: number; counts: RunCounts } | null;
   lastCompile?: { at: string; ok: boolean; issues: number } | null;
 }
 
@@ -229,9 +199,8 @@ export interface CreateProjectOptions {
   folderName: string;
   name: string;
   reportType: ReportType;
-  modelId?: string;
+  academicFormat?: AcademicFormat;
   owner?: string;
-  includeSampleSuite: boolean;
   engine: Engine;
   /** start from a saved user template instead of the built-in sections */
   templateId?: string;
@@ -254,7 +223,7 @@ export interface ToolchainInfo {
 export interface AppSettings {
   /** shown on comments you write */
   userName: string;
-  /** where new and sample projects go and exports default to; empty = Documents/Quire */
+  /** where new and sample projects go and exports default to; empty = Documents/TeXWriter */
   projectsDir: string;
   /** override: folder containing pdflatex/latexmk */
   texBinDir: string;
@@ -287,18 +256,16 @@ export interface SpellInfo { word: string; suggestions: string[]; at: number }
 export interface SyncTexLocation { file: string; line: number; column?: number }
 export interface SyncTexForward { page: number; x: number; y: number; width?: number; height?: number }
 
-export type RunEvent =
-  | { type: 'progress'; done: number; total: number; label: string }
-  | { type: 'log'; line: string }
-  | { type: 'finished'; meta: RunMeta };
+/** Output of a generated block's script while it runs. */
+export interface GeneratorEvent { id: string; line: string }
 
 export type CompileEvent =
   | { type: 'pass'; name: string }
   | { type: 'log'; line: string }
   | { type: 'finished'; result: CompileResult };
 
-/** Preload API exposed to the renderer as window.quire */
-export interface QuireApi {
+/** Preload API exposed to the renderer as window.texwriter */
+export interface TeXWriterApi {
   platform: string;
   toolchain(): Promise<ToolchainInfo>;
   recents(): Promise<RecentProject[]>;
@@ -323,11 +290,11 @@ export interface QuireApi {
   onCompileEvent(cb: (e: CompileEvent) => void): () => void;
   synctexEdit(root: string, page: number, x: number, y: number): Promise<SyncTexLocation | null>;
   synctexView(root: string, file: string, line: number): Promise<SyncTexForward | null>;
-  runTests(root: string): Promise<RunMeta>;
-  cancelRun(): Promise<void>;
-  onRunEvent(cb: (e: RunEvent) => void): () => void;
-  loadRun(root: string, n: number): Promise<RunRecord>;
-  listRuns(root: string): Promise<RunMeta[]>;
+  /** run the script paired with a generated block; resolves when it exits */
+  runGenerator(root: string, id: string): Promise<GeneratorRun>;
+  cancelGenerator(): Promise<void>;
+  onGeneratorEvent(cb: (e: GeneratorEvent) => void): () => void;
+  statFile(root: string, rel: string): Promise<{ mtimeMs: number; size: number } | null>;
   exportPdf(root: string): Promise<string | null>;
   exportBundle(root: string): Promise<string | null>;
   exportProvenance(root: string): Promise<string | null>;

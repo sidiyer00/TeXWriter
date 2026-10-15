@@ -1,5 +1,5 @@
 // Locate TeX, Python and Git executables. Looks at PATH (including the *current*
-// user/system PATH from the Windows registry, so tools installed after Quire started
+// user/system PATH from the Windows registry, so tools installed after TeXWriter started
 // are found), the default MiKTeX / TeX Live install folders, and user overrides.
 import fs from 'node:fs';
 import path from 'node:path';

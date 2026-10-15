@@ -1,18 +1,19 @@
 import { useEffect, useState } from 'react';
-import type { Engine, RecentProject, ReportType, UserTemplate } from '../../shared/types';
-import { TEMPLATES, TEMPLATE_GROUPS, templateInfo, type TemplateInfo } from '../../shared/templateCatalog';
-import { api, guard, openProject, setState, useStore, getState, runTests, promptText, toast } from '../store';
+import type { AcademicFormat, Engine, RecentProject, ReportType, UserTemplate } from '../../shared/types';
+import { ACADEMIC_FORMATS, TEMPLATES, academicFormatInfo, templateInfo, type TemplateInfo } from '../../shared/templateCatalog';
+import { api, guard, openProject, setState, useStore, getState, promptText, toast } from '../store';
 import { Dialog, TitleBar } from '../components/Chrome';
 import { Folder, Search, Warn } from '../components/Icons';
 
-const TYPE_LABEL = Object.fromEntries(TEMPLATES.map((t) => [t.type, t.short])) as Record<ReportType, string>;
+/** Project-list label; projects from earlier versions may carry other report types. */
+const typeLabel = (t: string) => templateInfo(t).type === t ? templateInfo(t).short : 'LaTeX';
 
 type Start = { type: ReportType; userId?: undefined } | { userId: string; type?: undefined };
 
 function Thumb({ t }: { t: TemplateInfo }) {
   return t.type === 'blank'
     ? <span className="tpl-thumb" style={{ background: 'var(--chrome)', border: '1px dashed #B9B1A5', display: 'grid', placeItems: 'center', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted-2)' }}>.tex</span>
-    : <span className={`tpl-thumb ${t.type === 'conference' ? 'two' : ''}`} aria-hidden="true"><span />{t.bars.map((h, i) => <span key={i} style={h > 2 ? { height: h, background: 'transparent', border: '1px solid #B9B1A5' } : undefined} />)}</span>;
+    : <span className="tpl-thumb" aria-hidden="true"><span />{t.bars.map((h, i) => <span key={i} style={h > 2 ? { height: h, background: 'transparent', border: '1px solid #B9B1A5' } : undefined} />)}</span>;
 }
 
 function ago(iso?: string) {
@@ -26,32 +27,27 @@ function ago(iso?: string) {
 
 function status(r: RecentProject): { cls: string; text: string } {
   if (r.lastCompile && !r.lastCompile.ok) return { cls: 'fail', text: 'Compile failed' };
-  if (r.lastRun?.counts.failed) return { cls: 'warn', text: 'Needs review' };
   if (!r.lastCompile) return { cls: 'run', text: 'Draft' };
   if (r.lastCompile.issues) return { cls: 'warn', text: `${r.lastCompile.issues} issue${r.lastCompile.issues > 1 ? 's' : ''}` };
   return { cls: 'pass', text: 'Ready to export' };
 }
 
 function nextAction(r: RecentProject): { title: string; detail: string; label: string; go: () => void } {
-  const open = async (view: 'editor' | 'tests' | 'review', after?: () => void) => { await openProject(r.root); if (getState().project) { setState({ view }); after?.(); } };
-  if (!r.lastRun && templateInfo(r.reportType).group === 'Model risk') return { title: 'Next: run the test suite', detail: 'Generated tables, figures and summaries fill in from the first run.', label: 'Open and run tests', go: () => void open('tests', () => void runTests()) };
-  if (r.lastRun?.counts.failed) return { title: `Next: review ${r.lastRun.counts.failed} failing test${r.lastRun.counts.failed > 1 ? 's' : ''} from run #${r.lastRun.number}`, detail: 'Decide whether each failure becomes a finding before you compile.', label: 'Review failures', go: () => void open('tests') };
-  if (!r.lastCompile) return { title: 'Next: compile the report', detail: 'Build the PDF and check references, citations and layout.', label: 'Open report', go: () => void open('editor') };
+  const open = async (view: 'editor' | 'review') => { await openProject(r.root); if (getState().project) setState({ view }); };
+  if (!r.lastCompile) return { title: 'Next: compile the document', detail: 'Build the PDF and check references, citations and layout.', label: 'Open document', go: () => void open('editor') };
   if (r.lastCompile.issues) return { title: `Next: resolve ${r.lastCompile.issues} compile issue${r.lastCompile.issues > 1 ? 's' : ''}`, detail: 'Each issue links to its source line and suggests a fix.', label: 'Review PDF', go: () => void open('review') };
   return { title: 'Next: export the final PDF', detail: 'The last compile was clean.', label: 'Open PDF review', go: () => void open('review') };
 }
 
 function Stepper({ r }: { r: RecentProject }) {
-  const run = r.lastRun;
   const steps = [
-    { name: 'Template', text: TYPE_LABEL[r.reportType], c: 'var(--pass)', t: 't-pass' },
-    { name: 'Test', text: run ? (run.counts.failed ? `${run.counts.failed} failed in #${run.number}` : `#${run.number} passed`) : 'Not run', c: run ? (run.counts.failed ? 'var(--warn)' : 'var(--pass)') : '#D9D4CB', t: run ? (run.counts.failed ? 't-warn' : 't-pass') : 'muted' },
-    { name: 'Edit', text: 'In progress', c: 'var(--accent)', t: 't-run' },
+    { name: 'Template', text: typeLabel(r.reportType), c: 'var(--pass)', t: 't-pass' },
+    { name: 'Write', text: 'In progress', c: 'var(--accent)', t: 't-run' },
     { name: 'Compile', text: r.lastCompile ? (r.lastCompile.ok ? (r.lastCompile.issues ? `${r.lastCompile.issues} issue${r.lastCompile.issues > 1 ? 's' : ''}` : 'Clean') : 'Failed') : 'Not yet', c: r.lastCompile ? (r.lastCompile.ok ? (r.lastCompile.issues ? 'var(--warn)' : 'var(--pass)') : 'var(--fail)') : '#D9D4CB', t: r.lastCompile ? (r.lastCompile.ok ? (r.lastCompile.issues ? 't-warn' : 't-pass') : 't-fail') : 'muted' },
     { name: 'Export', text: r.lastCompile?.ok && !r.lastCompile.issues ? 'Ready' : 'Not yet', c: '#D9D4CB', t: 'muted' },
   ];
   return (
-    <ol className="stepper" aria-label="Report workflow">
+    <ol className="stepper" aria-label="Document workflow">
       {steps.map((s) => <li key={s.name}><div className="bar" style={{ background: s.c }} /><span style={{ fontWeight: 500 }}>{s.name}</span><span className={`small ${s.t}`}>{s.text}</span></li>)}
     </ol>
   );
@@ -62,19 +58,19 @@ function NewProjectDialog({ start, userTemplates, onClose }: { start: Start; use
   const user = choice.startsWith('user:') ? userTemplates.find((u) => `user:${u.id}` === choice) ?? null : null;
   const reportType: ReportType = user ? user.baseType : (choice.slice(5) as ReportType);
   const info = templateInfo(reportType);
-  const [name, setName] = useState(() => (start.type === 'blank' ? 'Untitled report' : `${start.userId ? userTemplates.find((u) => u.id === start.userId)?.name ?? 'Report' : templateInfo(start.type!).title} ${new Date().getFullYear()}`));
+  const [format, setFormat] = useState<AcademicFormat>('ieee-conf');
+  const [name, setName] = useState(() => (start.type === 'blank' ? 'Untitled document' : start.type === 'academic' ? 'Paper title' : `${start.userId ? userTemplates.find((u) => u.id === start.userId)?.name ?? 'Document' : templateInfo(start.type!).title} ${new Date().getFullYear()}`));
   const [parent, setParent] = useState('');
-  const [modelId, setModelId] = useState('');
   const [owner, setOwner] = useState('');
   const [engine, setEngine] = useState<Engine>(user?.engine ?? 'pdflatex');
-  const [suite, setSuite] = useState(user ? false : info.suite);
   const [busy, setBusy] = useState(false);
   useEffect(() => { void api.defaultProjectsDir().then(setParent); }, []);
-  useEffect(() => { setSuite(user ? false : info.suite); if (user?.engine) setEngine(user.engine); }, [choice]);
-  const folder = name.trim().replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '-') || 'report';
+  useEffect(() => { if (user?.engine) setEngine(user.engine); }, [choice]);
+  const folder = name.trim().replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '-') || 'document';
+  const fmt = academicFormatInfo(format);
   const create = async () => {
     setBusy(true);
-    const p = await guard(() => api.createProject({ parentDir: parent, folderName: folder, name: name.trim(), reportType, modelId: modelId.trim() || undefined, owner: owner.trim() || undefined, includeSampleSuite: suite, engine, templateId: user?.id }), 'Could not create project');
+    const p = await guard(() => api.createProject({ parentDir: parent, folderName: folder, name: name.trim(), reportType, academicFormat: reportType === 'academic' ? format : undefined, owner: owner.trim() || undefined, engine, templateId: user?.id }), 'Could not create project');
     setBusy(false);
     if (p) { onClose(); await openProject(p.root); }
   };
@@ -82,19 +78,23 @@ function NewProjectDialog({ start, userTemplates, onClose }: { start: Start; use
     <Dialog title="New project" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-pri" disabled={busy || !name.trim() || !parent} onClick={create}>{busy ? 'Creating…' : 'Create project'}</button></>}>
       <label className="f">Title<input className="field" value={name} onChange={(e) => setName(e.target.value)} /></label>
       <label className="f">Template<select className="field" value={choice} onChange={(e) => setChoice(e.target.value)}>
-        {TEMPLATE_GROUPS.map((g) => <optgroup key={g} label={g}>{TEMPLATES.filter((t) => t.group === g).map((t) => <option key={t.type} value={`type:${t.type}`}>{t.title}</option>)}</optgroup>)}
+        {TEMPLATES.map((t) => <option key={t.type} value={`type:${t.type}`}>{t.title}</option>)}
         {userTemplates.length > 0 && <optgroup label="Your templates">{userTemplates.map((u) => <option key={u.id} value={`user:${u.id}`}>{u.name}</option>)}</optgroup>}
       </select></label>
-      <div className="small muted" style={{ marginTop: -6 }}>{user ? (user.description || templateKinds(user)) : info.text}</div>
+      {reportType === 'academic' && !user ? (
+        <label className="f">Journal format<select className="field" value={format} onChange={(e) => setFormat(e.target.value as AcademicFormat)}>
+          {ACADEMIC_FORMATS.map((f) => <option key={f.id} value={f.id}>{f.title}</option>)}
+        </select>
+          <span className="small muted">{fmt.text}{fmt.cls !== 'article' ? ` · uses the publisher's ${fmt.cls} class (MiKTeX installs it on first compile)` : ''}</span>
+        </label>
+      ) : <div className="small muted" style={{ marginTop: -6 }}>{user ? (user.description || templateKinds(user)) : info.text}</div>}
       <div className="row" style={{ gap: 12 }}>
-        <label className="f grow">{info.group === 'Model risk' ? 'Owner' : 'Author'}<input className="field" value={owner} onChange={(e) => setOwner(e.target.value)} /></label>
-        {info.group === 'Model risk' && <label className="f grow">Model ID<input className="field mono" value={modelId} placeholder="e.g. MRM-0417" onChange={(e) => setModelId(e.target.value)} /></label>}
+        <label className="f grow">{reportType === 'academic' ? 'Author' : 'Author or owner'}<input className="field" value={owner} onChange={(e) => setOwner(e.target.value)} /></label>
+        <label className="f grow">LaTeX engine<select className="field" value={engine} onChange={(e) => setEngine(e.target.value as Engine)}><option value="pdflatex">pdfLaTeX (fastest, most compatible)</option><option value="lualatex">LuaLaTeX (system fonts, Unicode)</option><option value="xelatex">XeLaTeX</option></select></label>
       </div>
-      <label className="f">LaTeX engine<select className="field" value={engine} onChange={(e) => setEngine(e.target.value as Engine)}><option value="pdflatex">pdfLaTeX (fastest, most compatible)</option><option value="lualatex">LuaLaTeX (system fonts, Unicode)</option><option value="xelatex">XeLaTeX</option></select></label>
       <div className="f">Location
         <div className="row"><input className="field mono" readOnly value={`${parent}${parent ? (api.platform === 'win32' ? '\\' : '/') : ''}${folder}`} /><button className="btn" onClick={async () => { const d = await api.chooseDirectory('Choose where to create the project'); if (d) setParent(d); }}>Change…</button></div>
       </div>
-      <label className="chk"><input type="checkbox" checked={suite} onChange={(e) => setSuite(e.target.checked)} />Include the sample Python validation suite (stdlib only) as a starting point</label>
     </Dialog>
   );
 }
@@ -160,6 +160,8 @@ export function Home() {
   const [recents, setRecents] = useState<RecentProject[] | null>(null);
   const [newType, setNewType] = useState<Start | null>(null);
   const [userTemplates, setUserTemplates] = useState<UserTemplate[]>([]);
+  const [version, setVersion] = useState('');
+  useEffect(() => { void api.appInfo().then((i) => setVersion(i.version)).catch(() => {}); }, []);
   const loadTemplates = () => void api.listTemplates().then(setUserTemplates).catch(() => setUserTemplates([]));
   useEffect(loadTemplates, []);
   const [filter, setFilter] = useState<'all' | ReportType>('all');
@@ -167,7 +169,7 @@ export function Home() {
   const project = useStore((s) => s.project);
   useEffect(() => { void api.recents().then(setRecents); }, [project]);
   const openFolder = async () => {
-    const d = await api.chooseDirectory('Open a Quire project or a folder of LaTeX files');
+    const d = await api.chooseDirectory('Open a TeXWriter project or a folder of LaTeX files');
     if (d) await openProject(d);
   };
   const sample = async () => {
@@ -175,7 +177,7 @@ export function Home() {
     const p = await guard(() => api.createSampleProject(parent), 'Could not create the sample');
     if (p) await openProject(p.root);
   };
-  const shown = (recents ?? []).filter((r) => (filter === 'all' || r.reportType === filter) && (!q || r.name.toLowerCase().includes(q.toLowerCase()) || (r.modelId ?? '').toLowerCase().includes(q.toLowerCase())));
+  const shown = (recents ?? []).filter((r) => (filter === 'all' || r.reportType === filter) && (!q || r.name.toLowerCase().includes(q.toLowerCase())));
   const top = recents?.[0];
   return (
     <>
@@ -183,7 +185,7 @@ export function Home() {
         <label className="no-drag row" style={{ width: '100%', maxWidth: 440, height: 32, padding: '0 10px', border: '1px solid var(--rule)', borderRadius: 7, background: '#fff', color: 'var(--muted-3)' }}>
           <Search /><input aria-label="Search projects" placeholder="Search projects by name or model ID" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, border: 0, outline: 'none', background: 'transparent', fontSize: 13, color: 'var(--ink)' }} />
         </label>
-      } right={<><button className="btn no-drag" onClick={openFolder}><Folder />Open folder…</button><button className="btn btn-pri no-drag" onClick={() => setNewType({ type: 'validation' })}>New project</button></>} />
+      } right={<><button className="btn no-drag" onClick={openFolder}><Folder />Open folder…</button><button className="btn btn-pri no-drag" onClick={() => setNewType({ type: 'documentation' })}>New project</button></>} />
       <div className="body">
         <nav aria-label="Workspace" style={{ width: 232, padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: 2, borderRight: '1px solid var(--rule)', background: 'var(--panel)' }}>
           <button className="nav active" aria-current="page">Home</button>
@@ -192,7 +194,7 @@ export function Home() {
           <div style={{ height: 1, background: 'var(--rule)', margin: '12px 4px' }} />
           <div className="lbl" style={{ padding: '4px 10px 8px' }}>This computer</div>
           <Toolchain />
-          <div style={{ marginTop: 'auto', padding: 10, fontSize: 12, color: 'var(--muted-3)' }}>Quire 0.1 · <button className="btn btn-q btn-xs" onClick={() => void api.toolchain().then((tc) => setState({ toolchain: tc }))}>Re-check tools</button></div>
+          <div style={{ marginTop: 'auto', padding: 10, fontSize: 12, color: 'var(--muted-3)' }}>TeXWriter {version} · <button className="btn btn-q btn-xs" onClick={() => void api.toolchain().then((tc) => setState({ toolchain: tc }))}>Re-check tools</button></div>
         </nav>
         <main className="home-main">
           <div className="home-grid">
@@ -200,8 +202,8 @@ export function Home() {
               {recents && recents.length === 0 && (
                 <section className="empty" style={{ background: '#fff', padding: 28 }}>
                   <h3 style={{ fontSize: 18 }}>Start your first report</h3>
-                  <div className="muted" style={{ maxWidth: 560 }}>Open the sample validation project to see the whole loop — a Python test suite, generated tables, and a compiled PDF — or start from a template.</div>
-                  <div className="row" style={{ marginTop: 6 }}><button className="btn btn-pri" onClick={sample}>Open sample project</button><button className="btn" onClick={() => setNewType({ type: 'validation' })}>New from template</button></div>
+                  <div className="muted" style={{ maxWidth: 560 }}>Open the sample project to see tables and a figure generated by Python scripts, or start from a template.</div>
+                  <div className="row" style={{ marginTop: 6 }}><button className="btn btn-pri" onClick={sample}>Open sample project</button><button className="btn" onClick={() => setNewType({ type: 'documentation' })}>New from template</button></div>
                 </section>
               )}
               {top && (() => {
@@ -213,15 +215,14 @@ export function Home() {
                     <div className="card">
                       <div className="row wrap" style={{ padding: '18px 20px', gap: 16, alignItems: 'flex-start', borderBottom: '1px solid var(--rule-2)' }}>
                         <div className="grow" style={{ flex: '1 1 360px' }}>
-                          <div className="row" style={{ marginBottom: 4 }}><span className={`st ${st.cls}`}>{st.cls === 'warn' && <Warn />}{st.text}</span><span className="small muted">{TYPE_LABEL[top.reportType]}</span></div>
+                          <div className="row" style={{ marginBottom: 4 }}><span className={`st ${st.cls}`}>{st.cls === 'warn' && <Warn />}{st.text}</span><span className="small muted">{typeLabel(top.reportType)}</span></div>
                           <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 600 }}>{top.name}</h2>
-                          <div className="muted">{top.modelId && <><span className="mono small">{top.modelId}</span> · </>}<span className="mono small">{top.root}</span></div>
+                          <div className="muted"><span className="mono small">{top.root}</span></div>
                         </div>
                         <button className="btn" onClick={() => void openProject(top.root)}>Open report</button>
                       </div>
                       <Stepper r={top} />
                       <dl style={{ margin: 0, padding: '16px 20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px 20px' }}>
-                        <div><dt className="lbl" style={{ marginBottom: 4 }}>Latest test run</dt><dd style={{ margin: 0 }}>{top.lastRun ? <><b style={{ fontWeight: 600 }}>#{top.lastRun.number}</b> · {top.lastRun.counts.passed} / {top.lastRun.counts.total} passed<div className={`small ${top.lastRun.counts.failed ? 't-fail' : 'muted'}`}>{top.lastRun.counts.failed} failed · {top.lastRun.counts.warning} warnings</div></> : <span className="muted">None yet</span>}</dd></div>
                         <div><dt className="lbl" style={{ marginBottom: 4 }}>Last compile</dt><dd style={{ margin: 0 }}>{top.lastCompile ? <><b style={{ fontWeight: 600 }}>{new Date(top.lastCompile.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</b><div className={`small ${top.lastCompile.ok ? (top.lastCompile.issues ? 't-warn' : 't-pass') : 't-fail'}`}>{top.lastCompile.ok ? `Succeeded · ${top.lastCompile.issues} issue${top.lastCompile.issues === 1 ? '' : 's'}` : 'Failed'}</div></> : <span className="muted">Not compiled</span>}</dd></div>
                       </dl>
                       <div className="row wrap" style={{ padding: '14px 20px', background: 'var(--accent-bg)', borderTop: '1px solid #D7E0F1', gap: 12 }}>
@@ -237,27 +238,26 @@ export function Home() {
                   <div className="row wrap" style={{ gap: 12 }}>
                     <h2 id="recent" style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Recent projects</h2>
                     <div className="row" style={{ marginLeft: 'auto', gap: 6 }}>
-                      {(['all', 'validation', 'monitoring', 'documentation'] as const).map((f) => <button key={f} className="btn btn-q" aria-pressed={filter === f} style={filter === f ? { background: '#E8E4DC' } : undefined} onClick={() => setFilter(f)}>{f === 'all' ? 'All' : TYPE_LABEL[f]}</button>)}
+                      {(['all', 'documentation', 'monitoring', 'academic'] as const).map((f) => <button key={f} className="btn btn-q" aria-pressed={filter === f} style={filter === f ? { background: '#E8E4DC' } : undefined} onClick={() => setFilter(f)}>{f === 'all' ? 'All' : typeLabel(f)}</button>)}
                     </div>
                   </div>
                   <div className="card" style={{ overflowX: 'auto' }}>
                     <table className="ptable">
-                      <thead><tr><th scope="col" style={{ paddingLeft: 16 }}>Project</th><th scope="col">Report type</th><th scope="col">Status</th><th scope="col">Latest run</th><th scope="col">Last compile</th><th scope="col" style={{ textAlign: 'right', paddingRight: 16 }}>Opened</th></tr></thead>
+                      <thead><tr><th scope="col" style={{ paddingLeft: 16 }}>Project</th><th scope="col">Template</th><th scope="col">Status</th><th scope="col">Last compile</th><th scope="col" style={{ textAlign: 'right', paddingRight: 16 }}>Opened</th></tr></thead>
                       <tbody>
                         {shown.map((r) => {
                           const st = status(r);
                           return (
                             <tr key={r.root} className="p" onClick={() => void openProject(r.root)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') void openProject(r.root); }}>
-                              <td style={{ paddingLeft: 16 }}><div style={{ fontWeight: 500 }}>{r.name}</div><div className="mono" style={{ fontSize: 11.5, color: 'var(--muted-3)' }}>{r.modelId ?? r.root}</div></td>
-                              <td>{TYPE_LABEL[r.reportType]}</td>
+                              <td style={{ paddingLeft: 16 }}><div style={{ fontWeight: 500 }}>{r.name}</div><div className="mono" style={{ fontSize: 11.5, color: 'var(--muted-3)' }}>{r.root}</div></td>
+                              <td>{typeLabel(r.reportType)}</td>
                               <td><span className={`st ${st.cls}`}>{st.text}</span></td>
-                              <td>{r.lastRun ? <>#{r.lastRun.number} · {r.lastRun.counts.failed ? <span className="t-fail">{r.lastRun.counts.failed} failed</span> : 'all passed'}</> : '—'}</td>
-                              <td>{r.lastCompile ? new Date(r.lastCompile.at).toLocaleDateString() : '—'}</td>
+                                                            <td>{r.lastCompile ? new Date(r.lastCompile.at).toLocaleDateString() : '—'}</td>
                               <td style={{ textAlign: 'right', paddingRight: 16, color: 'var(--muted-3)' }}>{ago(r.lastOpened)}</td>
                             </tr>
                           );
                         })}
-                        {shown.length === 0 && <tr><td colSpan={6} className="muted" style={{ padding: 16 }}>No projects match.</td></tr>}
+                        {shown.length === 0 && <tr><td colSpan={5} className="muted" style={{ padding: 16 }}>No projects match.</td></tr>}
                       </tbody>
                     </table>
                   </div>
@@ -267,24 +267,19 @@ export function Home() {
             <aside style={{ flex: '1 1 300px', maxWidth: 360, display: 'flex', flexDirection: 'column', gap: 28 }}>
               <section className="col" style={{ gap: 10 }} aria-labelledby="tpl">
                 <h2 id="tpl" style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Start from a template</h2>
-                {TEMPLATE_GROUPS.map((g) => (
-                  <div key={g} className="col" style={{ gap: 8 }}>
-                    <div className="lbl">{g}</div>
-                    {TEMPLATES.filter((t) => t.group === g).map((t) => (
-                      <button key={t.type} className="tpl" onClick={() => setNewType({ type: t.type })}>
-                        <Thumb t={t} />
-                        <span className="col" style={{ gap: 2 }}><span style={{ fontWeight: 600 }}>{t.title}</span><span className="small muted">{t.text}</span></span>
-                      </button>
-                    ))}
-                  </div>
+                {TEMPLATES.map((t) => (
+                  <button key={t.type} className="tpl" onClick={() => setNewType({ type: t.type })}>
+                    <Thumb t={t} />
+                    <span className="col" style={{ gap: 2 }}><span style={{ fontWeight: 600 }}>{t.title}</span><span className="small muted">{t.text}</span></span>
+                  </button>
                 ))}
               </section>
               <UserTemplates list={userTemplates} onUse={(id) => setNewType({ userId: id })} onChange={loadTemplates} />
               <section className="col" style={{ gap: 10 }}>
                 <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Sample project</h2>
                 <div className="empty">
-                  <div style={{ fontWeight: 500 }}>CORP-PD v4.2 Annual Validation</div>
-                  <div className="small muted">A complete validation report wired to a stdlib-only Python suite: discrimination, calibration, stability, data quality and backtesting tests, with generated tables and a reliability diagram.</div>
+                  <div style={{ fontWeight: 500 }}>Generated tables and figures</div>
+                  <div className="small muted">A short model document whose coefficient table and fit plot come from two small Python scripts, plus a table read from a file another program writes. Press Run all to generate them.</div>
                   <button className="btn" onClick={sample} style={{ marginTop: 4 }}>Create a copy in your projects folder</button>
                 </div>
               </section>

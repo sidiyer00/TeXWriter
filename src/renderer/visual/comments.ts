@@ -10,7 +10,7 @@ import { getState, mainFile, setState, updateAnchorQuotes } from '../store';
 import { textIndex } from './find';
 
 interface CState { ranges: Map<string, { from: number; to: number }>; deco: DecorationSet; sig: string }
-export const commentsKey = new PluginKey<CState>('quire-comments');
+export const commentsKey = new PluginKey<CState>('texwriter-comments');
 
 /** Flatten the document's text with a position map (blocks joined by newlines). */
 export function flatText(doc: PMNode): { text: string; pos: number[] } {
@@ -70,7 +70,7 @@ function build(doc: PMNode, ranges: Map<string, { from: number; to: number }>): 
 const sigOf = () => { const s = getState(); return JSON.stringify([s.activeComment, s.draftComment?.from, s.draftComment?.to, threadsHere().map((t) => [t.id, t.anchor.quote])]); };
 
 export const Comments = Extension.create({
-  name: 'quireComments',
+  name: 'texwriterComments',
   addProseMirrorPlugins() {
     let pendingQuotes = new Map<string, { quote: string; prefix: string; suffix: string }>();
     let timer = 0;

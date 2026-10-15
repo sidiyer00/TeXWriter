@@ -8,7 +8,7 @@ import { parseLatexLog, pagesFromLog } from '../shared/latex/log';
 import { hash } from '../shared/latex/scan';
 import { childEnv, toolchain } from './toolchain';
 import { BUILD_DIR } from './project';
-import { killTree } from './runs';
+import { killTree } from './generators';
 import { getSettings } from './settings';
 
 let current: ChildProcess | null = null;
@@ -19,7 +19,7 @@ function run(cmd: string, args: string[], cwd: string, emit: (e: CompileEvent) =
     let out = '';
     const child = spawn(cmd, args, { cwd, env, windowsHide: true, detached: process.platform !== 'win32' });
     current = child;
-    const timer = setTimeout(() => { out += '\n[quire] compile timed out\n'; killTree(child); }, timeoutMs);
+    const timer = setTimeout(() => { out += '\n[texwriter] compile timed out\n'; killTree(child); }, timeoutMs);
     const onData = (b: Buffer) => {
       const t = b.toString('utf8');
       out += t;
@@ -31,7 +31,7 @@ function run(cmd: string, args: string[], cwd: string, emit: (e: CompileEvent) =
     };
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
-    child.on('error', (e) => { out += `\n[quire] ${e.message}\n`; clearTimeout(timer); resolve({ code: null, out }); });
+    child.on('error', (e) => { out += `\n[texwriter] ${e.message}\n`; clearTimeout(timer); resolve({ code: null, out }); });
     child.on('close', (code) => { clearTimeout(timer); resolve({ code, out }); });
   });
 }
@@ -73,7 +73,7 @@ export async function compile(root: string, m: ProjectManifest, emit: (e: Compil
     current = null;
     return {
       ok: false, pdfPath: null, pages: null, durationMs: 0, startedAt, log: '', passes: [], texHash, usedFallback: false,
-      diagnostics: [{ id: 'tc', severity: 'error', kind: 'error', message: `${m.engine} was not found on this computer.`, detail: 'Install MiKTeX (miktex.org) or TeX Live. Quire looks on PATH, in the registry and in the default install folders; if it is installed somewhere else, set the folder in Settings → Tools.' }],
+      diagnostics: [{ id: 'tc', severity: 'error', kind: 'error', message: `${m.engine} was not found on this computer.`, detail: 'Install MiKTeX (miktex.org) or TeX Live. TeXWriter looks on PATH, in the registry and in the default install folders; if it is installed somewhere else, set the folder in Settings → Tools.' }],
     };
   }
 
@@ -91,7 +91,7 @@ export async function compile(root: string, m: ProjectManifest, emit: (e: Compil
   } else usedFallback = true;
 
   if (usedFallback && engineExe && !cancelled) {
-    out += '\n[quire] running the engine directly (latexmk unavailable)\n';
+    out += '\n[texwriter] running the engine directly (latexmk unavailable)\n';
     const engineArgs = [...installFlag, '-interaction=nonstopmode', '-file-line-error', '-synctex=1', `-output-directory=${BUILD_DIR}`, main];
     passEmit({ type: 'pass', name: m.engine });
     out += (await run(engineExe, engineArgs, root, passEmit, env)).out;
