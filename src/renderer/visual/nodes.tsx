@@ -24,6 +24,7 @@ import { Find } from './find';
 import { isMod } from '../keys';
 import { Comments } from './comments';
 import { followCite, followLabel, followUrl } from './navigate';
+import { editFootnoteAt } from './pagination';
 
 const META_TYPES = ['paragraph', 'heading', 'bulletList', 'orderedList', 'mathBlock', 'generatedBlock', 'figureBlock', 'calloutBlock', 'codeBlock', 'pageBreak', 'rawBlock', 'tableBlock'];
 
@@ -508,7 +509,11 @@ function CrossRefView(props: ReactNodeViewProps) {
 }
 
 function FootnoteView(props: ReactNodeViewProps) {
-  return <NodeViewWrapper as="span" className="chip-fn" title={captionText(props.node.attrs.latex)}>[fn]</NodeViewWrapper>;
+  // the number comes from a CSS counter, so it follows the document order
+  const text = captionText(props.node.attrs.latex);
+  return <NodeViewWrapper as="span" className="chip-fn" title={`${text || 'Empty footnote'}
+Double-click to edit at the foot of the page`}
+    onDoubleClick={() => { const pos = typeof props.getPos === 'function' ? props.getPos() : undefined; if (pos !== undefined) editFootnoteAt(props.editor.view, pos); }} />;
 }
 
 function InlineRawView(props: ReactNodeViewProps) {

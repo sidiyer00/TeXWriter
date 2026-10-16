@@ -9,6 +9,7 @@ import { editorRef } from './visual/editorRef';
 import { sourceViewRef } from './components/SourceEditor';
 import { anchorFor } from './visual/comments';
 import { followCite, followLabel, followUrl } from './visual/navigate';
+import { insertFootnote } from './visual/pagination';
 import { undo, redo, selectAll } from '@codemirror/commands';
 import { openSearchPanel } from '@codemirror/search';
 
@@ -350,7 +351,7 @@ export const insertMenu = (): MenuItem[] => {
     { separator: true },
     { label: 'Citation…', shortcut: 'Ctrl+Shift+K', disabled: !ok, run: () => setState({ picker: 'cite' }) },
     { label: 'Cross-reference…', shortcut: 'Ctrl+Shift+R', disabled: !ok, run: () => setState({ picker: 'ref' }) },
-    { label: 'Footnote', shortcut: 'Ctrl+Alt+F', disabled: !ok, run: () => ed()?.chain().focus().insertContent({ type: 'footnote', attrs: { latex: 'Footnote text.' } }).run() },
+    { label: 'Footnote', shortcut: 'Ctrl+Alt+F', disabled: !ok, run: () => { const e = ed(); if (e) insertFootnote(e); } },
     { label: 'Link…', shortcut: 'Ctrl+K', disabled: !ok, run: () => void insertLink() },
     { label: 'Comment', shortcut: 'Ctrl+Alt+M', disabled: !ok, run: newComment },
     { separator: true },
