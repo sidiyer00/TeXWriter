@@ -3,6 +3,7 @@ import { headingLevel, setBlockStyle, shiftHeading } from './visual/headings';
 import { api, compileNow, getState, loadSettings, loadToolchain, runAllGenerators, saveAll, setState, toast, togglePanel, useStore } from './store';
 import { flushVisual } from './visual/VisualEditor';
 import { editorRef } from './visual/editorRef';
+import { insertFootnote } from './visual/pagination';
 import { Home } from './views/Home';
 import { EditorScreen } from './views/Editor';
 import { ReviewScreen } from './views/Review';
@@ -86,13 +87,12 @@ function onKey(e: KeyboardEvent) {
   // visual-editor commands: only while typing in the document
   if (!inVisual()) return;
   const ed = editorRef.current!;
-  const c = () => ed.chain().focus();
   if (e.key === 'F12') { stop(); followAtCursor(); return; }
   if (mod && e.altKey && /^[0-5]$/.test(e.key)) { stop(); setBlockStyle(ed, Number(e.key)); return; }
   if (!mod && e.altKey && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && headingLevel(ed)) { stop(); shiftHeading(ed, e.key === 'ArrowLeft' ? -1 : 1); return; }
   if (mod && e.altKey && k === 'm') { stop(); newComment(); return; }
   if (mod && e.altKey && k === 't') { stop(); setState({ dialog: 'insertTable' }); return; }
-  if (mod && e.altKey && k === 'f') { stop(); c().insertContent({ type: 'footnote', attrs: { latex: 'Footnote text.' } }).run(); return; }
+  if (mod && e.altKey && k === 'f') { stop(); insertFootnote(ed); return; }
   if (mod && e.shiftKey && k === 'm') { stop(); insertEquation(); return; }
   if (mod && !e.shiftKey && !e.altKey && k === 'm') { stop(); insertInlineMath(); return; }
   if (mod && e.shiftKey && k === 'k') { stop(); setState({ picker: 'cite' }); return; }
