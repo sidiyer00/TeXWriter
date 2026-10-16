@@ -15,7 +15,6 @@ import { texToHtml } from './nodes';
 /** A4 at 96 dpi, in CSS pixels. Keep in step with `.page` in styles.css. */
 export const PAGE_W = 794;
 export const PAGE_H = 1123;
-const PAD_X = 76;
 const PAD_TOP = 56;
 const PAD_BOTTOM = 72;
 const GAP = 24;
