@@ -74,7 +74,7 @@ export function MenuList({ items, onDone, onBack, at, autoFocus = true, classNam
             <div key={i} onMouseEnter={() => setHi(i)}>
               <button role="menuitem" className={`mitem ${hi === i || sub?.i === i ? 'hi' : ''} ${it.danger ? 'danger' : ''}`} disabled={it.disabled} aria-haspopup={it.submenu ? 'menu' : undefined} aria-expanded={it.submenu ? sub?.i === i : undefined}
                 onMouseDown={(e) => e.preventDefault()} onClick={() => run(it, i)}>
-                <span className="mcheck">{it.swatch ? <i className="mswatch" style={{ background: it.swatch }} /> : it.checked ? <Check size={12} strokeWidth={2.6} /> : null}</span>
+                <span className={`mcheck ${it.icon ? 'micon' : ''} ${it.icon && it.checked ? 'on' : ''}`}>{it.swatch ? <i className="mswatch" style={{ background: it.swatch }} /> : it.icon ? it.icon : it.checked ? <Check size={12} strokeWidth={2.6} /> : null}</span>
                 <span className="grow">{it.label}</span>
                 {it.shortcut && <span className="mkey">{it.shortcut}</span>}
                 {it.submenu && <Right size={12} />}

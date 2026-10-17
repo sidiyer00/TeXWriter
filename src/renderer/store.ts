@@ -109,6 +109,8 @@ export interface MenuItem {
   danger?: boolean;
   /** a colour chip shown in place of the check mark */
   swatch?: string;
+  /** the toolbar symbol for this command, shown in place of the check mark */
+  icon?: import('react').ReactNode;
 }
 
 const initial: State = {

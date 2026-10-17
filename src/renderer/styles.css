@@ -666,3 +666,12 @@ tr.pg-gap { display: table-row; }
 .pg-gap-inner .pg-thead { font-size: 13px; line-height: 1.58; }
 
 .mathglyph { font-family: var(--serif); font-style: italic; font-size: 14px; letter-spacing: .02em; }
+
+/* menu entries that carry their toolbar symbol */
+.menu .mcheck { width: 22px; margin-right: 4px; }
+.menu .mitem .grow { white-space: nowrap; }
+.menu .mcheck.micon { color: var(--ink-2); }
+.menu .mcheck.micon svg { width: 16px; height: 16px; }
+.menu .mcheck.micon.on { color: var(--accent); background: var(--accent-bg-2); border-radius: 4px; }
+.texglyph { font-family: var(--serif); font-size: 12.5px; letter-spacing: -.02em; }
+.texglyph::first-letter { letter-spacing: -.12em; }

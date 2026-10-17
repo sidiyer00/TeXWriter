@@ -6,7 +6,7 @@ import { getState, promptText, setState, toast, togglePanel, useStore, mainFile,
 import { insertEquation, insertFigure, insertInlineMath, insertLink, newComment, insertMenu } from '../commands';
 import { MenuList, below, type Anchor } from './Menu';
 import { useOutside } from './Chrome';
-import { AlignC, AlignL, AlignR, Bucket, CommentIcon, ImageIcon, Link, Sigma, TableIcon, CellSplit, CellsMerge, ColDelete, ColLeft, ColRight, Down, HeaderCells, HeaderLevel, Indent, List, Menu as MenuIcon, OList, Outdent, RowAbove, RowBelow, RowDelete } from './Icons';
+import { AlignC, AlignL, AlignR, Bucket, CalloutIcon, CodeBlockIcon, CommentIcon, FootnoteIcon, ImageIcon, Link, ListsIcon, PageBreakIcon, Sigma, TableIcon, TocIcon, CellSplit, CellsMerge, ColDelete, ColLeft, ColRight, Down, HeaderCells, HeaderLevel, Indent, List, Menu as MenuIcon, OList, Outdent, RowAbove, RowBelow, RowDelete } from './Icons';
 import { CELL_FILLS, HIGHLIGHTS, TEXT_COLORS, cssColor } from '../visual/marks';
 import { applyNumberFormat, columnAlignAt, currentCellFill, currentNumber, deleteColumns, deleteTable, setCellFill, type FillScope, selectColumnOrRow, setCellValue, setColumnAlign, setTableBlockAttrs, tableBlockAt, currentColumns, addHeaderLevel } from '../visual/table';
 import { copyTableForSpreadsheet } from '../visual/clipboard';
@@ -14,7 +14,8 @@ import { HEADING_STYLES, MAX_HEADING, headingLevel, setBlockStyle, shiftHeading 
 import { HEADER_FILLS, TABLE_SIZES, TABLE_SPACING, TABLE_STYLES } from '../../shared/latex/table';
 import { NUM_KINDS, defaultFormat, describeFormat, stepDecimals, type NumKind } from '../../shared/latex/numfmt';
 
-interface Item { id: string; group: string; priority: number; node: ReactNode; menu?: MenuItem }
+/** `icon`: the button's symbol, shown next to the label when the item moves into More. */
+interface Item { id: string; group: string; priority: number; node: ReactNode; menu?: MenuItem; icon?: ReactNode }
 
 /** Lays items out in one row; anything that does not fit goes into a trailing "More" menu. */
 export function OverflowBar({ items, extra, label, right }: { items: Item[]; extra?: MenuItem[]; label: string; right?: ReactNode }) {
@@ -50,7 +51,7 @@ export function OverflowBar({ items, extra, label, right }: { items: Item[]; ext
     visible.add(it.id);
     lastGroups = new Set([...lastGroups, it.group]);
   }
-  const hidden = items.filter((i) => !visible.has(i.id) && i.menu).map((i) => i.menu!);
+  const hidden = items.filter((i) => !visible.has(i.id) && i.menu).map((i) => (i.icon && !i.menu!.icon ? { ...i.menu!, icon: i.icon } : i.menu!));
   const shown = items.filter((i) => visible.has(i.id));
   const moreItems = [...hidden, ...(hidden.length && extra?.length ? [{ separator: true }] : []), ...(extra ?? [])];
   return (
@@ -64,8 +65,8 @@ export function OverflowBar({ items, extra, label, right }: { items: Item[]; ext
           {it.node}
         </span>
       ))}
-      {moreItems.length > 0 && <MoreMenu items={moreItems} />}
       <span className="spacer" />
+      {moreItems.length > 0 && <MoreMenu items={moreItems} />}
       <div ref={rightRef} className="row" style={{ gap: 4, flex: 'none' }}>{right}</div>
     </div>
   );
@@ -200,7 +201,31 @@ export function FormatToolbar() {
     { id: 'fig', group: 'ins', priority: 4, node: btn('fig', <ImageIcon />, 'Insert figure (or paste / drop an image)', () => void insertFigure(), undefined, 'Figure'), menu: { label: 'Figure…', run: () => void insertFigure() } },
     { id: 'cmt', group: 'ins', priority: 4, node: btn('cmt', <CommentIcon />, 'New comment on the selection  Ctrl+Alt+M', newComment, undefined, 'Comment'), menu: { label: 'Comment', shortcut: 'Ctrl+Alt+M', run: newComment } },
   ];
-  const extra = insertMenu().filter((m) => m.label && ['Footnote', 'Code block', 'Callout', 'Page break', 'Table of contents', 'List of tables and figures', 'Raw LaTeX block', 'Test result…'].includes(m.label));
+  // the rest of Insert: symbols when there is room, otherwise in More with their labels
+  const ins = insertMenu();
+  const insItem = (id: string, label: string, icon: ReactNode, priority: number): Item | null => {
+    const m = ins.find((x) => x.label === label);
+    if (!m) return null;
+    const title = m.shortcut ? `${label}  ${m.shortcut}` : label;
+    return { id, group: 'blocks', priority, icon, node: btn(id, icon, title, () => m.run?.(), undefined, label, '', !ed || !!m.disabled), menu: { ...m, icon } };
+  };
+  items.push(...[
+    insItem('fn', 'Footnote', <FootnoteIcon />, 5),
+    insItem('codeblk', 'Code block', <CodeBlockIcon />, 6),
+    insItem('callout', 'Callout', <CalloutIcon />, 6),
+    insItem('pgbreak', 'Page break', <PageBreakIcon />, 5),
+    insItem('toc', 'Table of contents', <TocIcon />, 7),
+    insItem('lists', 'List of tables and figures', <ListsIcon />, 7),
+    insItem('rawblk', 'Raw LaTeX block', <span className="texglyph">TeX</span>, 7),
+  ].filter((x): x is Item => !!x));
+  // symbols for the items above that have one, so they keep it in More
+  const ICONS: Record<string, ReactNode> = {
+    promote: <Outdent />, demote: <Indent />, bold: <b>B</b>, italic: <i style={{ fontFamily: 'var(--serif)' }}>I</i>, underline: <u>U</u>,
+    code: <span style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>{'</>'}</span>, link: <Link size={15} />, ul: <List />, ol: <OList />,
+    eq: <Sigma />, math: <span className="mathglyph">$…$</span>, table: <TableIcon />, fig: <ImageIcon />, cmt: <CommentIcon />,
+  };
+  for (const it of items) if (!it.icon && ICONS[it.id]) it.icon = ICONS[it.id];
+  const extra = ins.filter((m) => m.label === 'Test result…');
   return (
     <div className="toolbar-stack">
       {/* once the panel is open its own tabs take over; these come back when it is closed */}
@@ -336,6 +361,14 @@ function TableToolbar() {
         {TABLE_STYLES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
       </select>), menu: { label: 'Table style', submenu: TABLE_STYLES.map((t) => ({ label: t.label, checked: tb?.node.attrs.style === t.id, run: () => setTableBlockAttrs(ed, { style: t.id }) })) } },
   ];
+  // symbols for the table commands, kept when they move into More
+  const TICONS: Record<string, ReactNode> = {
+    'dec-': <span className="decglyph">.0<small>−</small></span>, 'dec+': <span className="decglyph">.00<small>+</small></span>, sep: <b>,</b>,
+    cellfill: <Bucket size={15} />, 'row-above': <RowAbove />, 'row-below': <RowBelow />, 'del-row': <RowDelete />,
+    'col-left': <ColLeft />, 'col-right': <ColRight />, 'del-col': <ColDelete />, merge: <CellsMerge />, split: <CellSplit />,
+    al: <AlignL />, ac: <AlignC />, ar: <AlignR />, hdr: <HeaderCells />, hlevel: <HeaderLevel />,
+  };
+  for (const it of items) if (!it.icon && TICONS[it.id]) it.icon = TICONS[it.id];
   const ta = tb?.node.attrs ?? {};
   const extra: MenuItem[] = [
     { label: 'Cell value…', disabled: !cur || cur.header, run: () => void promptText('Cell value', 'Full-precision value (the cell shows it in its number format)', cur?.value ?? '').then((v) => { if (v != null && !setCellValue(ed, v)) toast('Not a number.', 'err'); }) },
