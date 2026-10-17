@@ -630,3 +630,54 @@ button.sb:hover { background: var(--hover-2); color: var(--ink); }
 .pg-head { box-sizing: border-box; padding: 56px 76px 0; overflow: hidden; }
 .pg-head .page-head { display: flex; font-family: var(--ui); line-height: normal; }
 .pg-tail { position: absolute; left: 0; right: 0; bottom: 0; user-select: none; }
+
+/* Cell fill picker */
+.fillglyph { position: relative; display: inline-flex; flex-direction: column; align-items: center; margin-right: 4px; }
+.fillglyph i { display: block; width: 16px; height: 3px; margin-top: 1px; border-radius: 1px; border: .5px solid rgba(31,30,28,.25); }
+.cellfill .seg { display: flex; margin-bottom: 8px; }
+.cellfill .seg button { flex: 1; height: 24px; padding: 0 8px; font-size: 12px; }
+.cellfill .seg button[aria-checked="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(31,30,28,.12); }
+.fillgrid { display: grid; grid-template-columns: repeat(8, 22px); gap: 5px; }
+.fillgrid .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent); }
+.colorwell { width: 28px; height: 26px; padding: 0 2px; border: 1px solid #D3CDC3; border-radius: 4px; background: #fff; cursor: pointer; flex: none; }
+.mswatch { display: block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(31,30,28,.2); }
+
+/* Figures: printed width, corner handles to resize */
+.figframe { position: relative; margin: 0 auto; }
+.figframe .figbox img, .figframe .figbox canvas { display: block; width: 100% !important; max-width: none !important; height: auto !important; }
+.fig-h { position: absolute; width: 11px; height: 11px; background: #fff; border: 1.5px solid var(--accent); border-radius: 2px; display: none; z-index: 2; }
+.fig-h.nw { left: -6px; top: -6px; cursor: nwse-resize; } .fig-h.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.fig-h.ne { right: -6px; top: -6px; cursor: nesw-resize; } .fig-h.sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.blk:hover .fig-h, .ProseMirror-selectednode .fig-h, .figframe.resizing .fig-h { display: block; }
+.figframe:hover, .ProseMirror-selectednode .figframe, .figframe.resizing { outline: 1px solid rgba(45, 91, 185, .45); }
+.fig-size { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); background: rgba(31,30,28,.78); color: #fff; font: 500 11px var(--ui); padding: 2px 8px; border-radius: 4px; pointer-events: none; white-space: nowrap; }
+body.fig-resizing, body.fig-resizing * { cursor: ew-resize !important; user-select: none !important; }
+
+/* A page break between table rows: a full-width row, then the header rows again */
+tr.pg-gap { display: table-row; }
+.tblock td.pg-gap-cell, .tblock tr.pg-gap:hover td.pg-gap-cell { padding: 0 !important; border: 0 !important; min-width: 0; background: none !important; }
+/* the page-wide strip must not widen the table: the cell's content counts as zero width */
+.pg-gap-wrap { display: block; contain: inline-size; width: 100%; }
+.pg-gap-inner { display: block; position: relative; text-align: left; font: normal 400 14.5px/1.58 var(--serif); }
+.tblock .tscroll:has(.pg-gap) { overflow: visible; }
+.tblock table.pg-thead { min-width: 0; margin: 0; table-layout: auto; border-bottom: 0; font-size: inherit; }
+.tblock table.pg-thead th, .tblock table.pg-thead td { border-color: transparent !important; }
+.tblock.tsize-small table.pg-thead { font-size: 12px; } .tblock.tsize-footnotesize table.pg-thead { font-size: 11px; } .tblock.tsize-scriptsize table.pg-thead { font-size: 10px; }
+.pg-gap-inner .pg-thead { font-size: 13px; line-height: 1.58; }
+
+.mathglyph { font-family: var(--serif); font-style: italic; font-size: 14px; letter-spacing: .02em; }
+
+/* menu entries that carry their toolbar symbol */
+.menu .mcheck { width: 22px; margin-right: 4px; }
+.menu .mitem .grow { white-space: nowrap; }
+.menu .mcheck.micon { color: var(--ink-2); }
+.menu .mcheck.micon svg { width: 16px; height: 16px; }
+.menu .mcheck.micon.on { color: var(--accent); background: var(--accent-bg-2); border-radius: 4px; }
+.texglyph { font-family: var(--serif); font-size: 12.5px; letter-spacing: -.02em; }
+.texglyph::first-letter { letter-spacing: -.12em; }
+
+/* delete button beside equations, tables, figures, code, callouts, lists and LaTeX blocks */
+.blk-del { position: absolute; z-index: 4; width: 28px; height: 28px; display: none; align-items: center; justify-content: center; padding: 0; border: 1px solid #E8C4BC; border-radius: 6px; background: #FFF; color: #B3261E; cursor: pointer; box-shadow: 0 1px 3px rgba(31,30,28,.12); }
+.blk-del.show { display: inline-flex; }
+.blk-del:hover { background: #B3261E; border-color: #B3261E; color: #fff; }
+.blk-del:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

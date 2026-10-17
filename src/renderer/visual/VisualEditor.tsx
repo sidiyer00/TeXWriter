@@ -4,6 +4,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { extensions, numberingKey, syncKey } from './nodes';
 import { Pagination } from './pagination';
+import { BlockDelete } from './blockDelete';
 import { editorRef } from './editorRef';
 import { getState, mainFile, parsedMain, setFileText, setFlushHook, setState, subscribe, useStore } from '../store';
 import { commentsKey } from './comments';
@@ -60,7 +61,7 @@ export function VisualEditor() {
   const pending = useRef<(() => void) | null>(null);
 
   const editor = useEditor({
-    extensions: [...extensions(), Pagination],
+    extensions: [...extensions(), Pagination, BlockDelete],
     content: toDocJson(parsedMain()) as any,
     // keep the caret clear of the floating table toolbar when typing near the top
     editorProps: { attributes: { spellcheck: 'true', 'aria-label': 'Report body' }, scrollMargin: { top: 56, bottom: 24, left: 5, right: 5 }, scrollThreshold: { top: 56, bottom: 24, left: 0, right: 0 } },

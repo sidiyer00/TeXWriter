@@ -41,6 +41,44 @@ describe('tables', () => {
     const again = serializeTableBlock(parseTableBlock(out)!);
     expect(again).toBe(out);
   });
+  it('cell fills on header, body and whole rows survive a round trip', () => {
+    const t = newTable(3, 3, 'booktabs', 'tab:fill');
+    const rows = t.content![0].content!;
+    rows[0].content![1].attrs!.background = 'BCD1F2'; // header cell
+    for (const c of rows[1].content!) c.attrs!.background = 'FFE98A'; // whole row
+    rows[2].content![2].attrs!.background = 'E3F2E6';
+    const out = serializeTableBlock(t);
+    expect(out).toContain('\\cellcolor[HTML]{BCD1F2}\\textbf{');
+    expect(out.match(/\\cellcolor\[HTML\]\{FFE98A\}/g)!.length).toBe(3);
+    const back = parseTableBlock(out)!.content![0].content!;
+    expect(back[0].content![1].attrs!.background).toBe('BCD1F2');
+    expect(back[1].content!.map((c) => c.attrs!.background)).toEqual(['FFE98A', 'FFE98A', 'FFE98A']);
+    expect(back[2].content![2].attrs!.background).toBe('E3F2E6');
+    expect(serializeTableBlock(parseTableBlock(out)!)).toBe(out);
+  });
+  it('breakable tables become a longtable with the header repeated on every page', () => {
+    const t = newTable(30, 3, 'booktabs', 'tab:long');
+    t.attrs = { ...t.attrs, caption: 'Long one.', breakable: true, size: 'small', stretch: '1.2' };
+    const out = serializeTableBlock(t);
+    expect(out.startsWith('\\begin{small}')).toBe(true);
+    expect(out).toContain('\\begin{longtable}{lrr}');
+    expect(out).toContain('\\caption{Long one.}\\label{tab:long}\\\\');
+    expect(out).toContain('\\endfirsthead');
+    expect(out).toContain('\\endhead');
+    expect(out.indexOf('\\endhead')).toBeLessThan(out.indexOf('\\bottomrule'));
+    const back = parseTableBlock(out)!;
+    expect(back.attrs).toMatchObject({ breakable: true, caption: 'Long one.', label: 'tab:long', size: 'small', stretch: '1.2', style: 'booktabs', cols: 'l r r' });
+    expect(back.content![0].content!.length).toBe(t.content![0].content!.length);
+    expect(serializeTableBlock(back)).toBe(out);
+    // through the document parser too
+    const doc = `\\documentclass{article}\n\\begin{document}\n\n${out}\n\n\\end{document}\n`;
+    const p = parseDocument(doc);
+    const json = toDocJson(p);
+    expect(json.content!.some((n) => n.type === 'tableBlock' && n.attrs?.breakable)).toBe(true);
+    expect(serializeDocument(p.prefix, json, p.suffix, p.leading).tex).toBe(doc);
+    // switching it off gives the floating table again
+    expect(serializeTableBlock({ ...back, attrs: { ...back.attrs, breakable: false } })).toContain('\\begin{table}');
+  });
   it('grid and new tables', () => {
     const g = parseTableBlock('\\begin{tabular}{|l|c|}\n\\hline\na & b \\\\\n\\hline\n\\end{tabular}')!;
     expect(g.attrs!.style).toBe('grid');

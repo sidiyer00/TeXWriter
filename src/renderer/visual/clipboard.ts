@@ -4,7 +4,7 @@
 // tab-separated text), or plain comma/semicolon CSV text, becomes an editable table.
 // Merged header cells are kept, so a multi-level header pastes as one. Inside an existing
 // table, tab-separated text fills cells from the cursor like a spreadsheet paste.
-// Ctrl+Shift+V always pastes plain text.
+// Ctrl+Shift+V always pastes plain text. Pasted or dropped images become figures (images.ts).
 //
 // Copy: copying cells or a whole table puts tab-separated text on the clipboard next to
 // the HTML, so Excel receives one value per cell. "Copy table for Excel" writes a clean
@@ -18,6 +18,7 @@ import type { Editor } from '@tiptap/react';
 import { undo } from '@tiptap/pm/history';
 import { flatRows, gridFromText, gridToHtml, gridToTableBlock, gridToTsv, looksTabular, tableNodeToExportGrid, type SpanGrid } from '../../shared/latex/grid';
 import { htmlTableToGrid, MAX_COLS, MAX_ROWS } from './htmlTable';
+import { figureFiles, insertFigureFiles } from './images';
 
 export { htmlTableToGrid };
 import { TABLE_STYLES, type TableStyle } from '../../shared/latex/table';
@@ -56,7 +57,7 @@ export function textToGrid(text: string): SpanGrid | null {
 // ------------------------------------------------------------------ insert
 
 /** Insert a block node like Insert → Table does: replace an empty paragraph, else go after the current block. */
-function insertBlockNode(view: EditorView, json: JNode): number {
+export function insertBlockNode(view: EditorView, json: JNode): number {
   const { state } = view;
   const node = state.schema.nodeFromJSON(json);
   const { $from } = state.selection;
@@ -174,6 +175,13 @@ export const spreadsheetClipboardPlugin = () => {
         const cd = event.clipboardData;
         if (!cd) return false;
         syncSelectionFromDom(view);
+        // a screenshot or a copied image: save it in the project and insert a figure
+        const images = figureFiles(cd, false);
+        if (images.length) {
+          event.preventDefault();
+          void insertFigureFiles(view, images);
+          return true;
+        }
         const html = cd.getData('text/html');
         const text = cd.getData('text/plain');
         // our own copies paste back exactly as they were
@@ -192,6 +200,16 @@ export const spreadsheetClipboardPlugin = () => {
         if (!g) return false;
         event.preventDefault();
         pasteGrid(view, g, text);
+        return true;
+      },
+      // image files dropped from the file manager or a browser become figures too
+      handleDrop(view, event, _slice, moved) {
+        if (moved) return false;
+        const images = figureFiles((event as DragEvent).dataTransfer, true);
+        if (!images.length) return false;
+        event.preventDefault();
+        const at = view.posAtCoords({ left: (event as DragEvent).clientX, top: (event as DragEvent).clientY })?.pos;
+        void insertFigureFiles(view, images, at);
         return true;
       },
       clipboardTextSerializer: (slice) => sliceText(slice),

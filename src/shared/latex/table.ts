@@ -298,9 +298,89 @@ function parseTabularBody(body: string, ncols: number): ParsedBody | null {
   return { rows, headerRows, ruleKinds, rulesBefore, headerFill };
 }
 
-/** Try to parse `\begin{table}…\end{table}` or a bare `\begin{tabular}…\end{tabular}`. */
+/**
+ * A table that may break across pages: longtable, with the header rows repeated at the top
+ * of every page (\endfirsthead / \endhead). Font size and row spacing go in a size
+ * environment around it so they stay local.
+ */
+function serializeLongtable(a: Record<string, any>, style: TableStyle, spec: string, lines: string[], headEnd: number): string {
+  const cap = (a.caption ? `\\caption{${a.caption}}` : '') + (a.label ? `\\label{${a.label}}` : '');
+  const bottom = a.captionPos === 'bottom';
+  const out: string[] = [];
+  if (style === 'striped') out.push('  \\rowcolors{2}{black!4}{}');
+  out.push(`  \\begin{longtable}{${spec}}`);
+  if (cap && !bottom) out.push(`    ${cap}\\\\`);
+  if (headEnd > 0) {
+    const head = lines.slice(0, headEnd);
+    out.push(...head, '    \\endfirsthead', ...head, '    \\endhead');
+  }
+  out.push(...lines.slice(headEnd));
+  if (cap && bottom) out.push(`    ${cap}\\\\`);
+  out.push('  \\end{longtable}');
+  const stretch = /^\d+(\.\d+)?$/.test(String(a.stretch ?? '')) ? `  \\renewcommand{\\arraystretch}{${a.stretch}}` : '';
+  if (!a.size && !stretch && style !== 'striped') return out.map((l) => l.slice(2)).join('\n');
+  const env = a.size || 'normalsize';
+  return [`\\begin{${env}}`, ...(stretch ? [stretch] : []), ...out, `\\end{${env}}`].join('\n');
+}
+
+/** A caption row (`\caption{…}\label{…}\\`) at the start of `t`. */
+function captionRow(t: string): { caption: string; label: string; len: number } | null {
+  const m = /^\s*\\caption\s*\{/.exec(t);
+  if (!m) return null;
+  const e = matchGroup(t, m[0].length - 1);
+  if (e < 0) return null;
+  const rest = /^\s*(?:\\label\{([^}]*)\})?\s*\\\\/.exec(t.slice(e));
+  if (!rest) return null;
+  return { caption: t.slice(m[0].length, e - 1), label: rest[1] ?? '', len: e + rest[0].length };
+}
+
+/** `\begin{longtable}…` (optionally inside a size environment) → a breakable table block. */
+function parseLongtable(src: string): JNode | null {
+  let s = src.trim();
+  let size = '', stretch = '';
+  const wrap = /^\\begin\{(small|footnotesize|scriptsize|normalsize)\}/.exec(s);
+  if (wrap) {
+    if (!s.endsWith(`\\end{${wrap[1]}}`)) return null;
+    if (wrap[1] !== 'normalsize') size = wrap[1];
+    s = s.slice(wrap[0].length, s.length - `\\end{${wrap[1]}}`.length).trim();
+    const st = /^\\renewcommand\s*\{?\\arraystretch\}?\s*\{(\d+(?:\.\d+)?)\}\s*/.exec(s);
+    if (st) { stretch = st[1]; s = s.slice(st[0].length); }
+  }
+  const rc = /^\\rowcolors\{2\}\{[^}]*\}\{[^}]*\}\s*/.exec(s);
+  const striped = !!rc;
+  if (rc) s = s.slice(rc[0].length);
+  if (!s.startsWith('\\begin{longtable}') || !s.endsWith('\\end{longtable}')) return null;
+  let body = s.slice('\\begin{longtable}'.length, s.length - '\\end{longtable}'.length);
+  if (body[0] !== '{') return null;
+  const specEnd = matchGroup(body, 0);
+  if (specEnd < 0) return null;
+  const spec = body.slice(1, specEnd - 1);
+  body = body.slice(specEnd);
+  if (/\\end(last)?foot\b/.test(body)) return null;
+  let caption = '', label = '', captionPos: 'top' | 'bottom' = 'top';
+  const top = captionRow(body);
+  if (top) { ({ caption, label } = top); body = body.slice(top.len); }
+  else {
+    const at = body.lastIndexOf('\\caption');
+    const bot = at >= 0 ? captionRow(body.slice(at)) : null;
+    if (bot && !body.slice(at + bot.len).trim()) { ({ caption, label } = bot); captionPos = 'bottom'; body = body.slice(0, at); }
+  }
+  // the header is written twice (first page, later pages): keep one copy
+  const fh = body.indexOf('\\endfirsthead');
+  if (fh >= 0) {
+    const eh = body.indexOf('\\endhead', fh);
+    if (eh < 0) return null;
+    body = body.slice(0, fh) + body.slice(eh + '\\endhead'.length);
+  } else body = body.replace(/\\endhead\b/, '');
+  const n = parseTableBlock(`\\begin{table}\n${striped ? '\\rowcolors{2}{black!4}{}\n' : ''}\\begin{tabular}{${spec}}${body}\\end{tabular}\n\\end{table}`);
+  if (!n) return null;
+  return { ...n, attrs: { ...n.attrs, caption, label, captionPos, size, stretch, placement: 'htbp', env: 'table', breakable: true } };
+}
+
+/** Try to parse `\begin{table}…\end{table}`, a bare `\begin{tabular}…\end{tabular}`, or a longtable. */
 export function parseTableBlock(src: string): JNode | null {
   let s = src.trim();
+  if (/^\\begin\{(longtable|small|footnotesize|scriptsize|normalsize)\}/.test(s)) return parseLongtable(s);
   let env = 'none';
   let placement = '';
   let inner = s;
@@ -435,6 +515,7 @@ export function serializeTableBlock(node: JNode): string {
     return segs.join(' ');
   };
   const lines: string[] = [];
+  let headEnd = 0; // lines[0..headEnd) are the top rule, the header rows and their rules
   const top = booktabsLike ? '\\toprule' : style === 'grid' || style === 'boxed' || style === 'lines' ? '\\hline' : '';
   if (top) lines.push(`    ${top}`);
   for (let r = 0; r < rows.length; r++) {
@@ -481,7 +562,9 @@ export function serializeTableBlock(node: JNode): string {
     if (style === 'grid' || style === 'lines') lines.push(`    ${fullRule(r)}`);
     else if (last) { if (booktabsLike) lines.push('    \\bottomrule'); else if (style === 'boxed') lines.push('    \\hline'); }
     else if (r === headerRows - 1) { if (booktabsLike) lines.push('    \\midrule'); else if (style === 'minimal' || style === 'boxed') lines.push('    \\hline'); }
+    if (r === headerRows - 1) headEnd = lines.length;
   }
+  if (a.breakable) return serializeLongtable(a, style, spec, lines, headEnd);
   const tabular = [`  \\begin{tabular}{${spec}}`, ...lines, '  \\end{tabular}'];
   const env: string = a.env || 'table';
   if (env === 'none') {

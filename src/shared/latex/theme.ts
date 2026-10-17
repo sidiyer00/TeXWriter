@@ -67,7 +67,7 @@ const hex = (s: string) => s.replace(/^#/, '').toUpperCase().padEnd(6, '0').slic
 const tex = (s: string) => s.replace(/([%&#_$])/g, '\\$1');
 
 /** Version of the support macros below; bump when they change so projects are migrated. */
-export const SUPPORT_VERSION = 'texwriter-support-v7';
+export const SUPPORT_VERSION = 'texwriter-support-v8';
 
 /** Macros the visual editor emits (highlights, merged table cells). Safe to load twice. */
 /**
@@ -80,6 +80,7 @@ export const SUPPORT_MACROS = [
   '\\IfFileExists{soul.sty}{\\usepackage{soul}\\def\\texwritersoulok{}}{}',
   '\\IfFileExists{multirow.sty}{\\usepackage{multirow}}{}',
   '\\usepackage{colortbl}',
+  '\\IfFileExists{longtable.sty}{\\usepackage{longtable}}{}% tables that break across pages',
   '\\ifx\\texwritersoulok\\undefined',
   '  \\providecommand{\\texwriterhl}[2]{\\colorbox[HTML]{#1}{#2}}',
   '\\else',

@@ -107,6 +107,10 @@ export interface MenuItem {
   separator?: boolean;
   submenu?: MenuItem[];
   danger?: boolean;
+  /** a colour chip shown in place of the check mark */
+  swatch?: string;
+  /** the toolbar symbol for this command, shown in place of the check mark */
+  icon?: import('react').ReactNode;
 }
 
 const initial: State = {
@@ -720,7 +724,7 @@ async function migrateSupportMacros() {
 
 /** Main file emits \texwriterhl / \multirow but has no TeXWriter preamble: add a small support block. */
 export function ensureSupportInMain(tex: string): string {
-  if (!/\\texwriterhl\{|\\multirow\{|\\qnum\[|\\texwriterindent\{|\\texwriterlistoftablesandfigures\b/.test(tex)) return tex;
+  if (!/\\texwriterhl\{|\\multirow\{|\\qnum\[|\\texwriterindent\{|\\texwriterlistoftablesandfigures\b|\\begin\{longtable\}/.test(tex)) return tex;
   const pre = state.project?.files.some((f) => f.path === 'preamble.tex') && /\\input\{preamble(\.tex)?\}/.test(tex);
   if (pre || /(texwriter|quire):support begin/.test(tex) || /\\(newcommand|providecommand)\{?\\texwriterhl/.test(tex)) return tex;
   const at = tex.search(/\\begin\{document\}/);

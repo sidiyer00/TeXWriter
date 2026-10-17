@@ -10,7 +10,7 @@ import { TABLE_STYLES } from '../../shared/latex/table';
 import { addHeaderLevel, applyNumberFormat, selectColumnOrRow, setColumnAlign, setTableBlockAttrs, tableBlockAt } from './table';
 import { copyTableForSpreadsheet } from './clipboard';
 import { stepDecimals } from '../../shared/latex/numfmt';
-import { addColumn, deleteColumn } from '../components/Toolbar';
+import { addColumn, cellFillMenu, deleteColumn } from '../components/Toolbar';
 import { editorBlockLines } from './VisualEditor';
 import { followCite } from './navigate';
 
@@ -96,6 +96,7 @@ export function visualContextMenu(ed: Editor, e: MouseEvent) {
       { label: 'Merge cells', disabled: !ed.can().mergeCells(), run: () => c().mergeCells().run() },
       { label: 'Split cell', disabled: !ed.can().splitCell(), run: () => c().splitCell().run() },
       { label: 'Toggle header cells', run: () => c().toggleHeaderCell().run() },
+      { label: 'Cell fill', submenu: cellFillMenu(ed) },
       { label: 'Add header level', run: () => addHeaderLevel(ed) },
       { label: 'Select column', run: () => selectColumnOrRow(ed, 'column') },
       { label: 'Select row', run: () => selectColumnOrRow(ed, 'row') },

@@ -1,7 +1,7 @@
 // Editable tables: TipTap's table schema wrapped in a `tableBlock` that carries the
 // LaTeX-level settings (caption, label, style, column alignment, spacing, header shading).
 // Body cells can carry an Excel-style number format (see shared/latex/numfmt.ts).
-import { Node } from '@tiptap/core';
+import { Extension, Node } from '@tiptap/core';
 import { NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps, type Editor } from '@tiptap/react';
 import { Table, TableRow, TableHeader, TableCell } from '@tiptap/extension-table';
 import { CellSelection, selectedRect } from '@tiptap/pm/tables';
@@ -92,7 +92,7 @@ export const TableBlock = Node.create({
   defining: true,
   addAttributes() {
     const r = (d: unknown) => ({ default: d, rendered: false });
-    return { caption: r(''), label: r(''), placement: r('htbp'), env: r('table'), style: r('booktabs'), cols: r(''), captionPos: r('top'), size: r(''), headerFill: r(''), stretch: r('') };
+    return { caption: r(''), label: r(''), placement: r('htbp'), env: r('table'), style: r('booktabs'), cols: r(''), captionPos: r('top'), size: r(''), headerFill: r(''), stretch: r(''), breakable: r(null) };
   },
   parseHTML() { return [{ tag: 'div[data-qtype="tableBlock"]', getAttrs: (el) => { try { return JSON.parse((el as HTMLElement).dataset.qattrs ?? '{}'); } catch { return {}; } } }]; },
   renderHTML({ node }) {
@@ -160,6 +160,45 @@ const numberCellPlugin = new Plugin({
     return tr;
   },
 });
+
+export type FillScope = 'cells' | 'row' | 'column' | 'table';
+
+/**
+ * Fill table cells with a background colour (hex RRGGBB or an xcolor name; null clears it),
+ * written as \cellcolor. `cells` is the cell selection or the cell at the cursor; `row`,
+ * `column` and `table` widen it to the whole rows, columns or table it touches. Header
+ * cells are included. Returns the number of cells changed.
+ */
+export function setCellFill(ed: Editor, color: string | null, scope: FillScope = 'cells'): number {
+  const { state } = ed;
+  const bg = color ? color.replace(/^#/, '') : null;
+  let rect: ReturnType<typeof selectedRect>;
+  try { rect = selectedRect(state); } catch { return 0; }
+  const { map } = rect;
+  const area = scope === 'table' ? { left: 0, right: map.width, top: 0, bottom: map.height }
+    : scope === 'row' ? { left: 0, right: map.width, top: rect.top, bottom: rect.bottom }
+    : scope === 'column' ? { left: rect.left, right: rect.right, top: 0, bottom: map.height }
+    : { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+  const tr = state.tr;
+  let n = 0;
+  for (const rel of new Set(map.cellsInRect(area))) {
+    const pos = rect.tableStart + rel;
+    const node = state.doc.nodeAt(pos);
+    if (!node || (node.attrs.background ?? null) === bg) continue;
+    tr.setNodeMarkup(pos, undefined, { ...node.attrs, background: bg });
+    n++;
+  }
+  if (n) ed.view.dispatch(tr);
+  ed.commands.focus();
+  return n;
+}
+
+/** Background of the cell at the cursor (or the first selected cell). */
+export function currentCellFill(ed: Editor): string | null {
+  const sel = ed.state.selection;
+  const c = sel instanceof CellSelection ? { node: sel.$anchorCell.nodeAfter } : cellAround(sel.$head);
+  return (c?.node?.attrs.background as string | null) ?? null;
+}
 
 /** Body cells (not headers) the format commands act on: the cell selection, or the cell at the cursor. */
 function targetCells(state: EditorState, scope: 'selection' | 'column'): { pos: number; node: PMNode }[] {
@@ -348,3 +387,41 @@ export function addHeaderLevel(ed: Editor) {
   const after = tableBlockAt(ed);
   if (after) ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, after.pos + 5)));
 }
+
+/** Delete the selected columns, keeping the tableBlock's column spec in step. */
+export function deleteColumns(ed: Editor) {
+  const cols = currentColumns(ed);
+  const tb = tableBlockAt(ed);
+  const spec: string[] = String(tb?.node.attrs.cols || '').split(/\s+/).filter(Boolean);
+  ed.chain().focus().deleteColumn().run();
+  if (cols && tableBlockAt(ed)) { spec.splice(cols[0], cols[1] - cols[0]); setTableBlockAttrs(ed, { cols: spec.join(' ') }); }
+}
+
+/** Delete the whole table block around the selection. */
+export function deleteTable(ed: Editor) {
+  const t = tableBlockAt(ed);
+  if (t) ed.view.dispatch(ed.state.tr.delete(t.pos, t.pos + t.node.nodeSize));
+}
+
+/**
+ * Backspace / Delete on whole selected rows or columns removes them, as in a spreadsheet;
+ * on all cells it removes the table. Partial cell selections keep clearing cell contents.
+ */
+export const TableDeleteKeys = Extension.create({
+  name: 'tableDeleteKeys',
+  priority: 1000,
+  addKeyboardShortcuts() {
+    const run = () => {
+      const ed = this.editor as unknown as Editor;
+      const sel = ed.state.selection;
+      if (!(sel instanceof CellSelection)) return false;
+      const rows = sel.isRowSelection(), cols = sel.isColSelection();
+      if (rows && cols) deleteTable(ed);
+      else if (rows) ed.chain().focus().deleteRow().run();
+      else if (cols) deleteColumns(ed);
+      else return false;
+      return true;
+    };
+    return { Backspace: run, Delete: run, 'Mod-Backspace': run, 'Mod-Delete': run };
+  },
+});
