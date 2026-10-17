@@ -6,7 +6,7 @@ import { getState, promptText, setState, toast, togglePanel, useStore, mainFile,
 import { insertEquation, insertFigure, insertInlineMath, insertLink, newComment, insertMenu } from '../commands';
 import { MenuList, below, type Anchor } from './Menu';
 import { useOutside } from './Chrome';
-import { AlignC, AlignL, AlignR, Bucket, CellSplit, CellsMerge, ColDelete, ColLeft, ColRight, Down, HeaderCells, HeaderLevel, Indent, List, Menu as MenuIcon, OList, Outdent, RowAbove, RowBelow, RowDelete } from './Icons';
+import { AlignC, AlignL, AlignR, Bucket, CommentIcon, ImageIcon, Link, Sigma, TableIcon, CellSplit, CellsMerge, ColDelete, ColLeft, ColRight, Down, HeaderCells, HeaderLevel, Indent, List, Menu as MenuIcon, OList, Outdent, RowAbove, RowBelow, RowDelete } from './Icons';
 import { CELL_FILLS, HIGHLIGHTS, TEXT_COLORS, cssColor } from '../visual/marks';
 import { applyNumberFormat, columnAlignAt, currentCellFill, currentNumber, deleteColumns, deleteTable, setCellFill, type FillScope, selectColumnOrRow, setCellValue, setColumnAlign, setTableBlockAttrs, tableBlockAt, currentColumns, addHeaderLevel } from '../visual/table';
 import { copyTableForSpreadsheet } from '../visual/clipboard';
@@ -189,16 +189,16 @@ export function FormatToolbar() {
     { id: 'tcolor', group: 'fmt', priority: 3, node: <ColorButton kind="text" />, menu: { label: 'Text colour', submenu: [...TEXT_COLORS.map((c) => ({ label: c.name, run: () => chain().setTextColor(c.hex).run() })), { separator: true }, { label: 'Default', run: () => chain().unsetTextColor().run() }] } },
     { id: 'hl', group: 'fmt', priority: 3, node: <ColorButton kind="highlight" />, menu: { label: 'Highlight', submenu: [...HIGHLIGHTS.map((c) => ({ label: c.name, run: () => chain().setHighlightColor(c.hex).run() })), { separator: true }, { label: 'None', run: () => chain().unsetHighlightColor().run() }] } },
     { id: 'code', group: 'fmt', priority: 6, node: btn('code', <span style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{'</>'}</span>, 'Monospace  Ctrl+E', () => chain().toggleCode().run(), ed?.isActive('code'), 'Monospace'), menu: { label: 'Monospace', shortcut: 'Ctrl+E', run: () => chain().toggleCode().run() } },
-    { id: 'link', group: 'fmt', priority: 7, node: btn('link', 'Link', 'Link  Ctrl+K', () => void insertLink(), ed?.isActive('link')), menu: { label: 'Link…', shortcut: 'Ctrl+K', run: () => void insertLink() } },
+    { id: 'link', group: 'fmt', priority: 3, node: btn('link', <Link size={16} />, 'Link  Ctrl+K', () => void insertLink(), ed?.isActive('link'), 'Link'), menu: { label: 'Link…', shortcut: 'Ctrl+K', run: () => void insertLink() } },
     { id: 'ul', group: 'list', priority: 2, node: btn('ul', <List />, 'Bulleted list  Ctrl+Shift+8', () => chain().toggleBulletList().run(), ed?.isActive('bulletList'), 'Bulleted list'), menu: { label: 'Bulleted list', shortcut: 'Ctrl+Shift+8', run: () => chain().toggleBulletList().run() } },
     { id: 'ol', group: 'list', priority: 2, node: btn('ol', <OList />, 'Numbered list  Ctrl+Shift+7', () => chain().toggleOrderedList().run(), ed?.isActive('orderedList'), 'Numbered list'), menu: { label: 'Numbered list', shortcut: 'Ctrl+Shift+7', run: () => chain().toggleOrderedList().run() } },
     { id: 'cite', group: 'ref', priority: 4, node: btn('cite', 'Cite', 'Insert citation  Ctrl+Shift+K', () => setState({ picker: 'cite' })), menu: { label: 'Citation…', shortcut: 'Ctrl+Shift+K', run: () => setState({ picker: 'cite' }) } },
     { id: 'xref', group: 'ref', priority: 4, node: btn('xref', 'Cross-ref', 'Insert cross-reference  Ctrl+Shift+R', () => setState({ picker: 'ref' })), menu: { label: 'Cross-reference…', shortcut: 'Ctrl+Shift+R', run: () => setState({ picker: 'ref' }) } },
-    { id: 'eq', group: 'ins', priority: 3, node: btn('eq', 'Equation', 'Display equation  Ctrl+Shift+M', insertEquation), menu: { label: 'Equation', shortcut: 'Ctrl+Shift+M', run: insertEquation } },
-    { id: 'math', group: 'ins', priority: 5, node: btn('math', 'Math', 'Inline math  Ctrl+M (or type $x$)', insertInlineMath), menu: { label: 'Inline math', shortcut: 'Ctrl+M', run: insertInlineMath } },
-    { id: 'table', group: 'ins', priority: 3, node: btn('table', 'Table', 'Insert table  Ctrl+Alt+T', () => setState({ dialog: 'insertTable' })), menu: { label: 'Table…', shortcut: 'Ctrl+Alt+T', run: () => setState({ dialog: 'insertTable' }) } },
-    { id: 'fig', group: 'ins', priority: 4, node: btn('fig', 'Figure', 'Insert figure', () => void insertFigure()), menu: { label: 'Figure…', run: () => void insertFigure() } },
-    { id: 'cmt', group: 'ins', priority: 4, node: btn('cmt', 'Comment', 'New comment on the selection  Ctrl+Alt+M', newComment), menu: { label: 'Comment', shortcut: 'Ctrl+Alt+M', run: newComment } },
+    { id: 'eq', group: 'ins', priority: 3, node: btn('eq', <Sigma />, 'Display equation  Ctrl+Shift+M', insertEquation, undefined, 'Equation'), menu: { label: 'Equation', shortcut: 'Ctrl+Shift+M', run: insertEquation } },
+    { id: 'math', group: 'ins', priority: 3, node: btn('math', <span className="mathglyph">$…$</span>, 'Inline math  Ctrl+M (or type $x$)', insertInlineMath, undefined, 'Inline math'), menu: { label: 'Inline math', shortcut: 'Ctrl+M', run: insertInlineMath } },
+    { id: 'table', group: 'ins', priority: 3, node: btn('table', <TableIcon />, 'Insert table  Ctrl+Alt+T', () => setState({ dialog: 'insertTable' }), undefined, 'Table'), menu: { label: 'Table…', shortcut: 'Ctrl+Alt+T', run: () => setState({ dialog: 'insertTable' }) } },
+    { id: 'fig', group: 'ins', priority: 4, node: btn('fig', <ImageIcon />, 'Insert figure (or paste / drop an image)', () => void insertFigure(), undefined, 'Figure'), menu: { label: 'Figure…', run: () => void insertFigure() } },
+    { id: 'cmt', group: 'ins', priority: 4, node: btn('cmt', <CommentIcon />, 'New comment on the selection  Ctrl+Alt+M', newComment, undefined, 'Comment'), menu: { label: 'Comment', shortcut: 'Ctrl+Alt+M', run: newComment } },
   ];
   const extra = insertMenu().filter((m) => m.label && ['Footnote', 'Code block', 'Callout', 'Page break', 'Table of contents', 'List of tables and figures', 'Raw LaTeX block', 'Test result…'].includes(m.label));
   return (
@@ -346,6 +346,7 @@ function TableToolbar() {
     { label: 'Text size', submenu: TABLE_SIZES.map((s) => ({ label: s.label, checked: (ta.size || '') === s.id, run: () => setTableBlockAttrs(ed, { size: s.id }) })) },
     { label: 'Row spacing', disabled: ta.env === 'none', submenu: TABLE_SPACING.map((s) => ({ label: s.label, checked: (ta.stretch || '') === s.id, run: () => setTableBlockAttrs(ed, { stretch: s.id }) })) },
     { label: 'Header shading', submenu: HEADER_FILLS.map((s) => ({ label: s.label, checked: (ta.headerFill || '') === s.id, run: () => setTableBlockAttrs(ed, { headerFill: s.id }) })) },
+    { label: 'Break across pages (repeat header)', checked: !!ta.breakable, run: () => setTableBlockAttrs(ed, { breakable: !ta.breakable }) },
     { label: 'Caption above table', checked: ta.captionPos !== 'bottom', run: () => setTableBlockAttrs(ed, { captionPos: 'top' }) },
     { label: 'Caption below table', checked: ta.captionPos === 'bottom', run: () => setTableBlockAttrs(ed, { captionPos: 'bottom' }) },
     { separator: true },

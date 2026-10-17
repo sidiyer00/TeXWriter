@@ -73,3 +73,10 @@ export const AlignC = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, .
 export const AlignR = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><path d="M4 6h16M10 10h10M4 14h16M10 18h10" /></svg>;
 export const HeaderCells = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><rect x="3" y="4" width="18" height="16" rx="1.5" /><path d="M3 9.5h18M9 9.5V20M15 9.5V20" /><rect x="3" y="4" width="18" height="5.5" rx="1.5" fill="currentColor" stroke="none" /></svg>;
 export const HeaderLevel = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><rect x="3" y="9" width="18" height="12" rx="1.5" /><path d="M3 14h18M12 14v7" /><rect x="3" y="9" width="18" height="5" rx="1.5" fill="currentColor" stroke="none" /><path d="M12 1.5v6M9 4.5h6" /></svg>;
+
+// insert toolbar glyphs
+const II = { strokeWidth: 1.8 };
+export const Sigma = ({ size = 17, ...p }: P) => <svg {...base(size, { ...II, ...p })}><path d="M18 6.5V4H6l6.5 8L6 20h12v-2.5" /></svg>;
+export const TableIcon = ({ size = 17, ...p }: P) => <svg {...base(size, { ...II, ...p })}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9.5h18M3 14.75h18M9.5 9.5V20M15 9.5V20" /></svg>;
+export const ImageIcon = ({ size = 17, ...p }: P) => <svg {...base(size, { ...II, ...p })}><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9.5" r="1.6" /><path d="m21 15.5-4.5-4.5L7 20" /></svg>;
+export const CommentIcon = ({ size = 17, ...p }: P) => <svg {...base(size, { ...II, ...p })}><path d="M20 15a2 2 0 0 1-2 2H8l-4 3.5V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z" /><path d="M12 7.5v6M9 10.5h6" /></svg>;

@@ -92,7 +92,7 @@ export const TableBlock = Node.create({
   defining: true,
   addAttributes() {
     const r = (d: unknown) => ({ default: d, rendered: false });
-    return { caption: r(''), label: r(''), placement: r('htbp'), env: r('table'), style: r('booktabs'), cols: r(''), captionPos: r('top'), size: r(''), headerFill: r(''), stretch: r('') };
+    return { caption: r(''), label: r(''), placement: r('htbp'), env: r('table'), style: r('booktabs'), cols: r(''), captionPos: r('top'), size: r(''), headerFill: r(''), stretch: r(''), breakable: r(null) };
   },
   parseHTML() { return [{ tag: 'div[data-qtype="tableBlock"]', getAttrs: (el) => { try { return JSON.parse((el as HTMLElement).dataset.qattrs ?? '{}'); } catch { return {}; } } }]; },
   renderHTML({ node }) {

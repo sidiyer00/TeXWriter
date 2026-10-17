@@ -22,8 +22,11 @@ const GAP = 24;
 export const pageKey = new PluginKey<DecorationSet>('pages');
 
 interface Fn { index: number; pos: number; latex: string; y: number }
-interface Brk { pos: number; inline: boolean; indent: number }
-interface Plan { breaks: Brk[]; pageFns: Fn[][]; headH: number; head: string }
+/** A break between table rows: the gap is a row, followed by a copy of the header rows. */
+interface RowBrk { cols: number; widths: number[]; head: string; font: string }
+interface Brk { pos: number; inline: boolean; indent: number; row?: RowBrk }
+/** `autoBreak`: long tables (taller than a page) not yet set to break across pages. */
+interface Plan { breaks: Brk[]; pageFns: Fn[][]; headH: number; head: string; autoBreak: number[] }
 
 const views = new WeakMap<EditorView, Paginator>();
 
@@ -123,6 +126,15 @@ class Paginator {
       this.view.dom.classList.remove('pg-measure');
       if (canvas) canvas.scrollTop = scroll;
     }
+    // a table taller than a page has to break across pages in the PDF too (longtable)
+    if (plan.autoBreak.length) {
+      const tr = this.view.state.tr;
+      for (const pos of plan.autoBreak) {
+        const n = tr.doc.nodeAt(pos);
+        if (n?.type.name === 'tableBlock' && n.attrs.breakable == null) tr.setNodeMarkup(pos, undefined, { ...n.attrs, breakable: true });
+      }
+      if (tr.docChanged) { this.view.dispatch(tr.setMeta('addToHistory', false)); return; } // the doc change schedules the next pass
+    }
     const sig = JSON.stringify(plan);
     if (sig !== this.sig) {
       this.sig = sig;
@@ -175,7 +187,7 @@ class Paginator {
     };
 
     // the units pages may break between: top-level blocks, list items within lists
-    interface Unit { pos: number; dom: HTMLElement; node: PMNode; top: number; bottom: number; kind: 'para' | 'heading' | 'break' | 'block' }
+    interface Unit { pos: number; dom: HTMLElement; node: PMNode; top: number; bottom: number; kind: 'para' | 'heading' | 'break' | 'table' | 'block' }
     const units: Unit[] = [];
     const add = (node: PMNode, pos: number) => {
       const dom = view.nodeDOM(pos) as HTMLElement | null;
@@ -185,7 +197,7 @@ class Paginator {
       const r = box.getBoundingClientRect();
       const mb = parseFloat(getComputedStyle(box).marginBottom || '0') || 0;
       const t = node.type.name;
-      units.push({ pos, dom, node, top: y(r.top), bottom: y(r.bottom) + mb, kind: t === 'paragraph' ? 'para' : t === 'heading' ? 'heading' : t === 'pageBreak' ? 'break' : 'block' });
+      units.push({ pos, dom, node, top: y(r.top), bottom: y(r.bottom) + mb, kind: t === 'paragraph' ? 'para' : t === 'heading' ? 'heading' : t === 'pageBreak' ? 'break' : t === 'tableBlock' ? 'table' : 'block' });
     };
     doc.forEach((node, pos) => {
       if ((node.type.name === 'bulletList' || node.type.name === 'orderedList') && node.childCount > 1) {
@@ -203,11 +215,63 @@ class Paginator {
       const p = el.getBoundingClientRect();
       return (p.left - aRect.left) / z + (parseFloat(getComputedStyle(el).paddingLeft || '0') || 0);
     };
-    const newPage = (pos: number, top: number, inline: boolean, parent: HTMLElement, at: number) => {
-      breaks.push({ pos, inline, indent: Math.round(indentOf(parent)) });
+    const autoBreak: number[] = [];
+    const newPage = (pos: number, top: number, inline: boolean, parent: HTMLElement, at: number, row?: RowBrk) => {
+      breaks.push({ pos, inline, indent: Math.round(indentOf(parent)), ...(row ? { row } : {}) });
       pageStart = top;
       starts.push(top);
       first = at;
+    };
+
+    /**
+     * Break a table between rows wherever the page runs out, repeating its header rows at the
+     * top of each new page. 'done' when the table is placed; 'move' when not even its header
+     * and one row fit here, so the whole table goes to the next page.
+     */
+    const splitTable = (u: Unit, i: number): 'done' | 'move' => {
+      const table = u.dom.querySelector<HTMLTableElement>('table');
+      const tableNode = u.node.firstChild;
+      if (!table || !tableNode) return 'move';
+      const trs = Array.from(table.rows).filter((r) => !r.classList.contains('pg-gap'));
+      if (trs.length !== tableNode.childCount) return 'move';
+      const rows = trs.map((r) => { const b = r.getBoundingClientRect(); return { top: y(b.top), bottom: y(b.bottom) }; });
+      let hc = 0;
+      while (hc < trs.length - 1 && Array.from(trs[hc].cells).every((c) => c.tagName === 'TH')) hc++;
+      // the copy also carries the table's top rule and the rule under the header
+      const headH = hc ? rows[hc - 1].bottom - rows[0].top + 3 : 0;
+      const rowPos: number[] = [];
+      tableNode.forEach((_r, off) => rowPos.push(u.pos + 2 + off));
+      // column widths for the repeated header, from a row without merged cells
+      const ncols = Math.max(...trs.map((r) => Array.from(r.cells).reduce((s, c) => s + c.colSpan, 0)));
+      const plain = trs.find((r) => r.cells.length === ncols);
+      // exact widths: rounding down makes header text wrap in the copy, which then runs taller
+      const w2 = (px: number) => Math.round((px / z) * 100) / 100;
+      const widths = plain ? Array.from(plain.cells).map((c) => w2(c.getBoundingClientRect().width)) : Array(ncols).fill(w2(table.getBoundingClientRect().width / ncols));
+      const head = trs.slice(0, hc).map((r) => {
+        const c = r.cloneNode(true) as HTMLElement;
+        c.querySelectorAll('[contenteditable]').forEach((e) => e.removeAttribute('contenteditable'));
+        c.querySelectorAll('.selectedCell').forEach((e) => e.classList.remove('selectedCell'));
+        return c.outerHTML;
+      }).join('');
+      // the copy sits outside the table's own text styles: carry its font size and line height over
+      const cs = hc ? getComputedStyle(trs[0].cells[0]) : null;
+      const font = cs ? `font-size:${cs.fontSize};line-height:${cs.lineHeight}` : '';
+      let at = 0; // first row on the current page
+      while (!fits(u.bottom)) {
+        const minEnd = at === 0 ? hc + 1 : at + 1; // keep the header with at least one row
+        let m = 0;
+        for (let k = rows.length - 1; k >= minEnd; k--) if (fits(rows[k - 1].bottom)) { m = k; break; }
+        if (!m) {
+          if (at === 0 && i !== first) {
+            newPage(u.pos, u.top, false, u.dom.parentElement!, i);
+            continue; // try again from the top of the new page
+          }
+          return 'done'; // one row is taller than a page: let it overflow
+        }
+        newPage(rowPos[m], rows[m].top - headH, false, table, i, { cols: ncols, widths, head, font });
+        at = m;
+      }
+      return 'done';
     };
 
     for (let i = 0; i < units.length; i++) {
@@ -243,6 +307,16 @@ class Paginator {
         if (fits(u.bottom) || i === first) continue;
         if (from > 0) continue; // already split; the rest overflows a full page
       }
+      // a table that may break across pages continues on the next one under a copy of its header
+      if (u.kind === 'table') {
+        const breakable = u.node.attrs.breakable;
+        const long = u.bottom - u.top > capN;
+        if (breakable == null && long) autoBreak.push(u.pos);
+        if (breakable || (breakable == null && long)) {
+          const r = splitTable(u, i);
+          if (r === 'done') continue;
+        }
+      }
       if (i === first) continue; // taller than a page: let it overflow
       // keep a heading with the text that follows it
       let at = i;
@@ -255,7 +329,7 @@ class Paginator {
     measurer.remove();
 
     const pageFns: Fn[][] = starts.map((s, k) => fns.filter((f) => f.y >= s && (k + 1 >= starts.length || f.y < starts[k + 1])).map((f) => ({ ...f, pos: 0, y: 0 })));
-    return { breaks, pageFns, headH, head: headEl?.innerHTML ?? '' };
+    return { breaks, pageFns, headH, head: headEl?.innerHTML ?? '', autoBreak };
   }
 
   // ------------------------------------------------------------ drawing
@@ -264,18 +338,34 @@ class Paginator {
     const doc = this.view.state.doc;
     const decos = plan.breaks.map((b, k) => {
       const fns = plan.pageFns[k] ?? [];
-      const key = `pg${k}|${b.inline ? 'i' : 'b'}|${b.indent}|${plan.headH}|${plan.head}|${fns.map((f) => `${f.index}:${f.latex}`).join('\u0001')}`;
+      const key = `pg${k}|${b.inline ? 'i' : 'b'}|${b.indent}|${plan.headH}|${plan.head}|${fns.map((f) => `${f.index}:${f.latex}`).join('\u0001')}|${b.row ? `${b.row.cols}:${b.row.widths.join(',')}:${b.row.font}:${b.row.head}` : ''}`;
       return Decoration.widget(b.pos, () => this.gap(k, b, fns, plan), { side: -1, key, ignoreSelection: true, stopEvent: () => true });
     });
     return DecorationSet.create(doc, decos);
   }
 
   private gap(k: number, b: Brk, fns: Fn[], plan: Plan): HTMLElement {
-    const tag = b.inline ? 'span' : 'div';
-    const el = document.createElement(tag);
-    el.className = 'pg-gap';
-    el.contentEditable = 'false';
-    el.dataset.page = String(k);
+    // between table rows the gap is itself a row: one cell across the table holding the page end
+    let root: HTMLElement;
+    let el: HTMLElement;
+    if (b.row) {
+      root = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = b.row.cols;
+      td.className = 'pg-gap-cell';
+      const wrap = document.createElement('div');
+      wrap.className = 'pg-gap-wrap';
+      el = document.createElement('div');
+      el.className = 'pg-gap-inner';
+      wrap.appendChild(el);
+      td.appendChild(wrap);
+      root.appendChild(td);
+    } else {
+      root = el = document.createElement(b.inline ? 'span' : 'div');
+    }
+    root.classList.add('pg-gap');
+    root.contentEditable = 'false';
+    root.dataset.page = String(k);
     el.style.marginLeft = `${-b.indent}px`;
     el.style.width = `${PAGE_W}px`;
     const part = (cls: string) => { const p = document.createElement('span'); p.className = cls; el.appendChild(p); return p; };
@@ -290,8 +380,18 @@ class Paginator {
     inner.className = 'page-head';
     inner.innerHTML = plan.head;
     head.appendChild(inner);
-    this.wire(el);
-    return el;
+    if (b.row?.head) {
+      // the table's header rows again, at the top of the new page
+      const t = document.createElement('table');
+      t.className = 'pg-thead';
+      t.style.marginLeft = `${b.indent}px`;
+      t.style.width = `${b.row.widths.reduce((s, w) => s + w, 0) + 1}px`;
+      if (b.row.font) t.style.cssText += `;${b.row.font}`;
+      t.innerHTML = `<colgroup>${b.row.widths.map((w) => `<col style="width:${w}px">`).join('')}</colgroup><tbody>${b.row.head}</tbody>`;
+      el.appendChild(t);
+    }
+    this.wire(root);
+    return root;
   }
 
   /** Footnote clicks: the number jumps to the reference, the text opens the editor. */
