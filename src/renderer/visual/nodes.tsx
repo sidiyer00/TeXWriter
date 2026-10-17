@@ -290,12 +290,66 @@ export function RichInline({ latex }: { latex: string }) {
   );
 }
 
+/** Share of the text width a figure's \includegraphics width stands for (null if unknown). */
+export function widthFraction(w: string): number | null {
+  const s = String(w ?? '').trim();
+  const rel = /^([\d.]*)\s*\\(linewidth|textwidth|columnwidth|hsize)$/.exec(s);
+  if (rel) { const f = rel[1] ? parseFloat(rel[1]) : 1; return Number.isFinite(f) ? f : null; }
+  // absolute lengths, against a 16 cm text block
+  const abs = /^([\d.]+)\s*(cm|mm|in|pt|bp)$/.exec(s);
+  if (!abs) return null;
+  const cm = parseFloat(abs[1]) * ({ cm: 1, mm: 0.1, in: 2.54, pt: 2.54 / 72.27, bp: 2.54 / 72 } as Record<string, number>)[abs[2]];
+  return cm / 16;
+}
+
+/** The figure at its printed width, with corner handles that drag it wider or narrower. */
+function FigureFrame({ width, onResize, children }: { width: string; onResize: (w: string) => void; children: ReactElement }) {
+  const frac = Math.min(1, Math.max(0.05, widthFraction(width) ?? 0.8));
+  const [live, setLive] = useState<number | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const shown = live ?? frac;
+  const start = (e: React.MouseEvent, dir: 1 | -1) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const frame = ref.current, box = frame?.parentElement;
+    if (!frame || !box) return;
+    const full = box.getBoundingClientRect().width;
+    const w0 = frame.getBoundingClientRect().width;
+    const x0 = e.clientX;
+    let f = shown;
+    // the figure is centred, so each side moves by the pointer's travel
+    // Chromium sends stray moves with no button down (after a repaint); only real drags count
+    const move = (ev: MouseEvent) => { if (!(ev.buttons & 1)) return; f =Math.round(Math.min(1, Math.max(0.05, (w0 + 2 * dir * (ev.clientX - x0)) / full)) * 100) / 100; setLive(f); };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      document.body.classList.remove('fig-resizing');
+      setLive(null);
+      if (Math.abs(f - frac) >= 0.005) onResize(f >= 0.995 ? '\\linewidth' : `${f}\\linewidth`);
+    };
+    document.body.classList.add('fig-resizing');
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+  return (
+    <div className={`figframe ${live !== null ? 'resizing' : ''}`} ref={ref} style={{ width: `${shown * 100}%` }}>
+      {children}
+      {(['nw', 'ne', 'sw', 'se'] as const).map((c) => (
+        <span key={c} className={`fig-h ${c}`} contentEditable={false} title="Drag to resize" onMouseDown={(e) => start(e, c.endsWith('e') ? 1 : -1)} />
+      ))}
+      {live !== null && <span className="fig-size">{Math.round(live * 100)}% of text width</span>}
+    </div>
+  );
+}
+
 function FigureBlockView(props: ReactNodeViewProps) {
   const a = props.node.attrs;
   const num = numFrom(props);
   return (
     <NodeViewWrapper className="blk" style={{ margin: '0 0 18px', padding: '8px 0' }} data-drag-handle="">
-      <AssetPreview path={a.path} />
+      <FigureFrame width={a.width} onResize={(w) => props.updateAttributes({ width: w })}>
+        <AssetPreview path={a.path} maxWidth={640} />
+      </FigureFrame>
       <div className="cap" style={{ textAlign: 'center' }}><b>Figure {num ?? ''}</b><RichInline latex={a.caption} /></div>
     </NodeViewWrapper>
   );

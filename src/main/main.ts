@@ -176,6 +176,16 @@ function handle<T extends unknown[], R>(channel: string, fn: (...args: T) => Pro
   });
 }
 
+/** `destDir/name` (spaces and odd characters made safe), numbered when the name is taken. */
+function freeAssetPath(root: string, destDir: string, name: string): string {
+  const clean = path.basename(name).replace(/\s+/g, '-').replace(/[^\w.+-]/g, '') || 'file';
+  const { name: stem, ext } = path.parse(clean);
+  let rel = `${destDir}/${clean}`;
+  let k = 2;
+  while (fs.existsSync(safeJoin(root, rel))) rel = `${destDir}/${stem}-${k++}${ext}`;
+  return rel;
+}
+
 function assertRoot(root: string) {
   if (!isOpenRoot(root)) throw new Error('Project is not open.');
 }
@@ -238,12 +248,20 @@ function registerIpc() {
   handle('readBinary', async (root: string, rel: string) => { assertRoot(root); return new Uint8Array(await fsp.readFile(safeJoin(root, rel))); });
   handle('importAsset', async (root: string, abs: string, destDir: string) => {
     assertRoot(root);
-    const name = path.basename(abs).replace(/\s+/g, '-');
-    let rel = `${destDir}/${name}`;
-    let k = 2;
-    while (fs.existsSync(safeJoin(root, rel))) rel = `${destDir}/${path.parse(name).name}-${k++}${path.extname(name)}`;
+    const rel = freeAssetPath(root, destDir, path.basename(abs));
     await fsp.mkdir(path.dirname(safeJoin(root, rel)), { recursive: true });
     await fsp.copyFile(abs, safeJoin(root, rel));
+    return rel;
+  });
+  // pasted or dropped file contents (screenshots, images copied from a browser)
+  handle('writeAsset', async (root: string, destDir: string, name: string, bytes: Uint8Array) => {
+    assertRoot(root);
+    if (!(bytes instanceof Uint8Array) || bytes.length > 200 * 1024 * 1024) throw new Error('Bad file data');
+    const rel = freeAssetPath(root, destDir, name);
+    const abs = safeJoin(root, rel);
+    await fsp.mkdir(path.dirname(abs), { recursive: true });
+    selfWrites.set(abs, Date.now());
+    await fsp.writeFile(abs, bytes);
     return rel;
   });
   handle('watchProject', (root: string) => {

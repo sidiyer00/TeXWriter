@@ -641,3 +641,14 @@ button.sb:hover { background: var(--hover-2); color: var(--ink); }
 .fillgrid .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent); }
 .colorwell { width: 28px; height: 26px; padding: 0 2px; border: 1px solid #D3CDC3; border-radius: 4px; background: #fff; cursor: pointer; flex: none; }
 .mswatch { display: block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(31,30,28,.2); }
+
+/* Figures: printed width, corner handles to resize */
+.figframe { position: relative; margin: 0 auto; }
+.figframe .figbox img, .figframe .figbox canvas { display: block; width: 100% !important; max-width: none !important; height: auto !important; }
+.fig-h { position: absolute; width: 11px; height: 11px; background: #fff; border: 1.5px solid var(--accent); border-radius: 2px; display: none; z-index: 2; }
+.fig-h.nw { left: -6px; top: -6px; cursor: nwse-resize; } .fig-h.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.fig-h.ne { right: -6px; top: -6px; cursor: nesw-resize; } .fig-h.sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.blk:hover .fig-h, .ProseMirror-selectednode .fig-h, .figframe.resizing .fig-h { display: block; }
+.figframe:hover, .ProseMirror-selectednode .figframe, .figframe.resizing { outline: 1px solid rgba(45, 91, 185, .45); }
+.fig-size { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); background: rgba(31,30,28,.78); color: #fff; font: 500 11px var(--ui); padding: 2px 8px; border-radius: 4px; pointer-events: none; white-space: nowrap; }
+body.fig-resizing, body.fig-resizing * { cursor: ew-resize !important; user-select: none !important; }

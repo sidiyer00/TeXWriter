@@ -284,6 +284,8 @@ export interface TeXWriterApi {
   removeGeneratedFile(root: string, id: string): Promise<void>;
   readBinary(root: string, rel: string): Promise<Uint8Array>;
   importAsset(root: string, absPath: string, destDir: string): Promise<string>;
+  /** write file contents (a pasted image) to destDir/name in the project; returns the path used */
+  writeAsset(root: string, destDir: string, name: string, bytes: Uint8Array): Promise<string>;
   fileUrl(root: string, rel: string): string;
   watchProject(root: string): Promise<void>;
   onFileChanged(cb: (rel: string) => void): () => void;

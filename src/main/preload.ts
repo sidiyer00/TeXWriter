@@ -32,6 +32,7 @@ const api: TeXWriterApi = {
   removeGeneratedFile: (root, id) => call('removeGeneratedFile', root, id),
   readBinary: (root, rel) => call('readBinary', root, rel),
   importAsset: (root, abs, dest) => call('importAsset', root, abs, dest),
+  writeAsset: (root, dest, name, bytes) => call('writeAsset', root, dest, name, bytes),
   fileUrl: (root, rel) => `texwriter-file://local/?root=${encodeURIComponent(root)}&path=${encodeURIComponent(rel)}`,
   watchProject: (root) => call('watchProject', root),
   onFileChanged: (cb) => on('file-changed', cb),
