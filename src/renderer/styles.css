@@ -630,3 +630,14 @@ button.sb:hover { background: var(--hover-2); color: var(--ink); }
 .pg-head { box-sizing: border-box; padding: 56px 76px 0; overflow: hidden; }
 .pg-head .page-head { display: flex; font-family: var(--ui); line-height: normal; }
 .pg-tail { position: absolute; left: 0; right: 0; bottom: 0; user-select: none; }
+
+/* Cell fill picker */
+.fillglyph { position: relative; display: inline-flex; flex-direction: column; align-items: center; margin-right: 4px; }
+.fillglyph i { display: block; width: 16px; height: 3px; margin-top: 1px; border-radius: 1px; border: .5px solid rgba(31,30,28,.25); }
+.cellfill .seg { display: flex; margin-bottom: 8px; }
+.cellfill .seg button { flex: 1; height: 24px; padding: 0 8px; font-size: 12px; }
+.cellfill .seg button[aria-checked="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(31,30,28,.12); }
+.fillgrid { display: grid; grid-template-columns: repeat(8, 22px); gap: 5px; }
+.fillgrid .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent); }
+.colorwell { width: 28px; height: 26px; padding: 0 2px; border: 1px solid #D3CDC3; border-radius: 4px; background: #fff; cursor: pointer; flex: none; }
+.mswatch { display: block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(31,30,28,.2); }

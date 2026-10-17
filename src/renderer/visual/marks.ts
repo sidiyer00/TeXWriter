@@ -56,3 +56,11 @@ export const HIGHLIGHTS: { name: string; hex: string }[] = [
   { name: 'Yellow', hex: 'FFF176' }, { name: 'Green', hex: 'C8E6C9' }, { name: 'Blue', hex: 'BBDEFB' },
   { name: 'Pink', hex: 'F8BBD0' }, { name: 'Orange', hex: 'FFE0B2' }, { name: 'Grey', hex: 'E0DDD7' },
 ];
+
+/** Table cell fills: one column per hue, light to strong (light enough for black text). */
+export const CELL_FILL_HUES = ['Grey', 'Red', 'Orange', 'Yellow', 'Green', 'Teal', 'Blue', 'Purple'] as const;
+export const CELL_FILLS: { name: string; hex: string }[][] = [
+  [{ name: 'Light grey', hex: 'F2F0EC' }, { name: 'Light red', hex: 'FBE4E0' }, { name: 'Light orange', hex: 'FDEBD8' }, { name: 'Light yellow', hex: 'FFF6CC' }, { name: 'Light green', hex: 'E3F2E6' }, { name: 'Light teal', hex: 'DDF1EF' }, { name: 'Light blue', hex: 'E1EBFA' }, { name: 'Light purple', hex: 'ECE4F6' }],
+  [{ name: 'Grey', hex: 'DEDAD3' }, { name: 'Red', hex: 'F5BFB5' }, { name: 'Orange', hex: 'F9CFA2' }, { name: 'Yellow', hex: 'FFE98A' }, { name: 'Green', hex: 'BFE0C6' }, { name: 'Teal', hex: 'B2DFDA' }, { name: 'Blue', hex: 'BCD1F2' }, { name: 'Purple', hex: 'D3C2EC' }],
+  [{ name: 'Dark grey', hex: 'BDB7AD' }, { name: 'Strong red', hex: 'EC9283' }, { name: 'Strong orange', hex: 'F3AE68' }, { name: 'Strong yellow', hex: 'F7D547' }, { name: 'Strong green', hex: '93C99E' }, { name: 'Strong teal', hex: '7FC8C0' }, { name: 'Strong blue', hex: '93B3E8' }, { name: 'Strong purple', hex: 'B79CDF' }],
+];

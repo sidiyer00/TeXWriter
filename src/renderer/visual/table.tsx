@@ -161,6 +161,45 @@ const numberCellPlugin = new Plugin({
   },
 });
 
+export type FillScope = 'cells' | 'row' | 'column' | 'table';
+
+/**
+ * Fill table cells with a background colour (hex RRGGBB or an xcolor name; null clears it),
+ * written as \cellcolor. `cells` is the cell selection or the cell at the cursor; `row`,
+ * `column` and `table` widen it to the whole rows, columns or table it touches. Header
+ * cells are included. Returns the number of cells changed.
+ */
+export function setCellFill(ed: Editor, color: string | null, scope: FillScope = 'cells'): number {
+  const { state } = ed;
+  const bg = color ? color.replace(/^#/, '') : null;
+  let rect: ReturnType<typeof selectedRect>;
+  try { rect = selectedRect(state); } catch { return 0; }
+  const { map } = rect;
+  const area = scope === 'table' ? { left: 0, right: map.width, top: 0, bottom: map.height }
+    : scope === 'row' ? { left: 0, right: map.width, top: rect.top, bottom: rect.bottom }
+    : scope === 'column' ? { left: rect.left, right: rect.right, top: 0, bottom: map.height }
+    : { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+  const tr = state.tr;
+  let n = 0;
+  for (const rel of new Set(map.cellsInRect(area))) {
+    const pos = rect.tableStart + rel;
+    const node = state.doc.nodeAt(pos);
+    if (!node || (node.attrs.background ?? null) === bg) continue;
+    tr.setNodeMarkup(pos, undefined, { ...node.attrs, background: bg });
+    n++;
+  }
+  if (n) ed.view.dispatch(tr);
+  ed.commands.focus();
+  return n;
+}
+
+/** Background of the cell at the cursor (or the first selected cell). */
+export function currentCellFill(ed: Editor): string | null {
+  const sel = ed.state.selection;
+  const c = sel instanceof CellSelection ? { node: sel.$anchorCell.nodeAfter } : cellAround(sel.$head);
+  return (c?.node?.attrs.background as string | null) ?? null;
+}
+
 /** Body cells (not headers) the format commands act on: the cell selection, or the cell at the cursor. */
 function targetCells(state: EditorState, scope: 'selection' | 'column'): { pos: number; node: PMNode }[] {
   const out: { pos: number; node: PMNode }[] = [];

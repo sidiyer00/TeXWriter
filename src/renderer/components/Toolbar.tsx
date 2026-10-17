@@ -6,9 +6,9 @@ import { getState, promptText, setState, toast, togglePanel, useStore, mainFile,
 import { insertEquation, insertFigure, insertInlineMath, insertLink, newComment, insertMenu } from '../commands';
 import { MenuList, below, type Anchor } from './Menu';
 import { useOutside } from './Chrome';
-import { Down, Indent, List, Menu as MenuIcon, OList, Outdent } from './Icons';
-import { HIGHLIGHTS, TEXT_COLORS, cssColor } from '../visual/marks';
-import { applyNumberFormat, columnAlignAt, currentNumber, selectColumnOrRow, setCellValue, setColumnAlign, setTableBlockAttrs, tableBlockAt, currentColumns, addHeaderLevel } from '../visual/table';
+import { Bucket, Down, Indent, List, Menu as MenuIcon, OList, Outdent } from './Icons';
+import { CELL_FILLS, HIGHLIGHTS, TEXT_COLORS, cssColor } from '../visual/marks';
+import { applyNumberFormat, columnAlignAt, currentCellFill, currentNumber, setCellFill, type FillScope, selectColumnOrRow, setCellValue, setColumnAlign, setTableBlockAttrs, tableBlockAt, currentColumns, addHeaderLevel } from '../visual/table';
 import { copyTableForSpreadsheet } from '../visual/clipboard';
 import { HEADING_STYLES, MAX_HEADING, headingLevel, setBlockStyle, shiftHeading } from '../visual/headings';
 import { HEADER_FILLS, TABLE_SIZES, TABLE_SPACING, TABLE_STYLES } from '../../shared/latex/table';
@@ -235,23 +235,59 @@ export function deleteColumn() {
   if (cols && tableBlockAt(ed)) { spec.splice(cols[0], cols[1] - cols[0]); setTableBlockAttrs(ed, { cols: spec.join(' ') }); }
 }
 
-function CellColor() {
+const FILL_SCOPES: { id: FillScope; label: string; title: string }[] = [
+  { id: 'cells', label: 'Cells', title: 'The selected cells, or the cell at the cursor' },
+  { id: 'row', label: 'Row', title: 'Whole rows of the selection' },
+  { id: 'column', label: 'Column', title: 'Whole columns of the selection' },
+  { id: 'table', label: 'Table', title: 'Every cell of the table' },
+];
+
+/** Cell fill: a palette, a custom colour, and whether it applies to cells, rows, columns or the table. */
+function CellFill() {
   const [open, setOpen] = useState(false);
+  const [scope, setScope] = useState<FillScope>('cells');
+  const [custom, setCustom] = useState('');
   const ref = useRef<HTMLDivElement>(null);
   useOutside(ref, () => setOpen(false));
-  const colors = ['F3ECE6', 'E6F1EA', 'F8E5E1', 'F7ECD9', 'E5ECF8', 'ECEAE6', 'FFF176', 'D7E0F1'];
-  const set = (c: string | null) => { setOpen(false); editorRef.current?.chain().focus().setCellAttribute('background', c).run(); };
+  const ed = editorRef.current;
+  const cur = ed ? currentCellFill(ed) : null;
+  const apply = (c: string | null) => { setOpen(false); const e = editorRef.current; if (e) setCellFill(e, c, scope); };
+  const md = (e: React.MouseEvent) => e.preventDefault();
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <button className="tb" aria-haspopup="dialog" aria-expanded={open} onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(!open)}>Cell colour <Down size={10} /></button>
+      <button className="tb" aria-label="Cell fill" title="Cell fill: colour the background of table cells" aria-haspopup="dialog" aria-expanded={open} onMouseDown={md} onClick={() => { if (!open) { setScope('cells'); setCustom(''); } setOpen(!open); }}>
+        <span className="fillglyph" aria-hidden="true"><Bucket size={14} /><i style={{ background: cur ? cssColor(cur) : 'transparent' }} /></span>Fill <Down size={10} />
+      </button>
       {open && (
-        <div className="menu swatches" style={{ top: 32, left: 0, padding: 8 }}>
-          <div className="row wrap" style={{ gap: 6, width: 176 }}>{colors.map((c) => <button key={c} className="swatch" aria-label={`#${c}`} style={{ background: `#${c}` }} onMouseDown={(e) => e.preventDefault()} onClick={() => set(c)} />)}</div>
-          <button className="btn btn-q btn-xs" style={{ marginTop: 6 }} onMouseDown={(e) => e.preventDefault()} onClick={() => set(null)}>No colour</button>
+        <div className="menu swatches cellfill" role="dialog" aria-label="Cell fill" style={{ top: 32, left: 0, padding: 8 }}>
+          <div className="seg" role="radiogroup" aria-label="Apply to">
+            {FILL_SCOPES.map((s) => <button key={s.id} role="radio" aria-checked={scope === s.id} title={s.title} onMouseDown={md} onClick={() => setScope(s.id)}>{s.label}</button>)}
+          </div>
+          <div className="fillgrid">
+            {CELL_FILLS.flat().map((p) => <button key={p.hex} className="swatch" title={`${p.name} (#${p.hex})`} aria-label={p.name} aria-pressed={cur?.toUpperCase() === p.hex} style={{ background: `#${p.hex}` }} onMouseDown={md} onClick={() => apply(p.hex)} />)}
+          </div>
+          <div className="row" style={{ gap: 4, marginTop: 8 }}>
+            <input type="color" className="colorwell" aria-label="Pick a custom colour" value={`#${custom.length === 6 ? custom : (cur && /^[0-9A-F]{6}$/i.test(cur) ? cur : 'FFFFFF')}`} onChange={(e) => setCustom(e.target.value.slice(1).toUpperCase())} />
+            <input className="field mono" style={{ height: 26, width: 84 }} placeholder="RRGGBB" aria-label="Custom colour (hex)" value={custom} onChange={(e) => setCustom(e.target.value.replace(/[^0-9a-f]/gi, '').slice(0, 6).toUpperCase())} onKeyDown={(e) => { if (e.key === 'Enter' && custom.length === 6) apply(custom); }} />
+            <button className="btn btn-xs" disabled={custom.length !== 6} onMouseDown={md} onClick={() => apply(custom)}>Apply</button>
+          </div>
+          <button className="btn btn-q btn-xs" style={{ marginTop: 6 }} onMouseDown={md} onClick={() => apply(null)}>No fill</button>
         </div>
       )}
     </div>
   );
+}
+
+/** Menu entries for the cell fill (overflow menu, right-click menu). */
+export function cellFillMenu(ed: import('@tiptap/react').Editor): MenuItem[] {
+  const named = CELL_FILLS[0].concat(CELL_FILLS[1]);
+  const sub = (scope: FillScope): MenuItem[] => [
+    ...named.map((c) => ({ label: c.name, swatch: `#${c.hex}`, run: () => void setCellFill(ed, c.hex, scope) })),
+    { separator: true },
+    { label: 'Custom colour…', run: () => void promptText('Cell fill', 'Hex colour, e.g. FFE98A', '').then((v) => { const h = v?.trim().replace(/^#/, '').toUpperCase(); if (h && /^[0-9A-F]{6}$/.test(h)) setCellFill(ed, h, scope); else if (h) toast('Use six hex digits, e.g. FFE98A.', 'err'); }) },
+    { label: 'No fill', run: () => void setCellFill(ed, null, scope) },
+  ];
+  return FILL_SCOPES.map((s) => ({ label: s.id === 'cells' ? 'Selected cells' : s.id === 'table' ? 'Whole table' : `Whole ${s.label.toLowerCase()}`, submenu: sub(s.id) }));
 }
 
 /** Excel's formula bar for a table cell: the full-precision value behind the formatted text. */
@@ -304,6 +340,7 @@ function TableToolbar() {
     { id: 'sep', group: 'num', priority: 2, node: b('sep', ',', () => applyNumberFormat(ed, (f) => (f && f.kind !== 'scientific' ? { ...f, thousands: !fmt?.thousands } : f)), 'Thousands separator (1,234)', !!fmt?.thousands, !canSep), menu: { label: 'Thousands separator', checked: !!fmt?.thousands, disabled: !canSep, run: () => applyNumberFormat(ed, (f) => (f && f.kind !== 'scientific' ? { ...f, thousands: !fmt?.thousands } : f)) } },
     { id: 'nfmt', group: 'num', priority: 2, node: b('nfmt', 'Format…', () => setState({ dialog: 'numberFormat' }), 'Number format: decimals or significant figures, currency, negatives…', undefined, !cur || cur.header), menu: { label: 'Number format…', run: () => setState({ dialog: 'numberFormat' }) } },
     { id: 'nval', group: 'num', priority: 2, node: <ValueBox value={cur?.value ?? null} disabled={!cur || cur.header} />, menu: { label: 'Cell value…', disabled: !cur || cur.header, run: () => void promptText('Cell value', 'Full-precision value (the cell shows it in its number format)', cur?.value ?? '').then((v) => { if (v != null && !setCellValue(ed, v)) toast('Not a number.', 'err'); }) } },
+    { id: 'cellfill', group: 'fill', priority: 1, node: <CellFill />, menu: { label: 'Cell fill', submenu: cellFillMenu(ed) } },
     { id: 'row-above', group: 'rows', priority: 1, node: b('row-above', '+ Row above', () => c().addRowBefore().run()), menu: { label: 'Insert row above', run: () => c().addRowBefore().run() } },
     { id: 'row-below', group: 'rows', priority: 1, node: b('row-below', '+ Row below', () => c().addRowAfter().run()), menu: { label: 'Insert row below', run: () => c().addRowAfter().run() } },
     { id: 'col-left', group: 'cols', priority: 2, node: b('col-left', '+ Col left', () => addColumn('left')), menu: { label: 'Insert column left', run: () => addColumn('left') } },
@@ -314,7 +351,6 @@ function TableToolbar() {
     { id: 'split', group: 'merge', priority: 3, node: b('split', 'Split cell', () => c().splitCell().run()), menu: { label: 'Split cell', run: () => c().splitCell().run() } },
     { id: 'hlevel', group: 'hdr', priority: 3, node: b('hlevel', '+ Header level', () => addHeaderLevel(ed), 'Add a header row above the table for group labels; select the cells a label spans and Merge cells'), menu: { label: 'Add header level', run: () => addHeaderLevel(ed) } },
     { id: 'hdr', group: 'hdr', priority: 3, node: b('hdr', 'Header cells', () => c().toggleHeaderCell().run(), 'Toggle header styling for the selected cells (select a whole row for a second header level)'), menu: { label: 'Toggle header cells', run: () => c().toggleHeaderCell().run() } },
-    { id: 'cellcolor', group: 'hdr', priority: 3, node: <CellColor />, menu: { label: 'Clear cell colour', run: () => c().setCellAttribute('background', null).run() } },
     { id: 'al', group: 'align', priority: 3, node: b('al', 'Left', () => setColumnAlign(ed, 'l'), 'Align column left', align === 'l'), menu: { label: 'Align column left', run: () => setColumnAlign(ed, 'l') } },
     { id: 'ac', group: 'align', priority: 3, node: b('ac', 'Centre', () => setColumnAlign(ed, 'c'), 'Centre column', align === 'c'), menu: { label: 'Centre column', run: () => setColumnAlign(ed, 'c') } },
     { id: 'ar', group: 'align', priority: 3, node: b('ar', 'Right', () => setColumnAlign(ed, 'r'), 'Align column right', align === 'r'), menu: { label: 'Align column right', run: () => setColumnAlign(ed, 'r') } },

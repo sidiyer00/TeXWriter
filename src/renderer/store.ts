@@ -107,6 +107,8 @@ export interface MenuItem {
   separator?: boolean;
   submenu?: MenuItem[];
   danger?: boolean;
+  /** a colour chip shown in place of the check mark */
+  swatch?: string;
 }
 
 const initial: State = {

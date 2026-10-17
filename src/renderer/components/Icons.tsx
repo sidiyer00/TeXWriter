@@ -11,6 +11,8 @@ export const Check = ({ size = 12, ...p }: P) => <svg {...base(size, p)}><path d
 export const X = ({ size = 12, ...p }: P) => <svg {...base(size, p)}><path d="M18 6 6 18M6 6l12 12" /></svg>;
 export const Warn = ({ size = 12, ...p }: P) => <svg {...base(size, p)}><path d="M12 3 2 21h20L12 3z" /><path d="M12 10v4M12 17.5v.5" /></svg>;
 export const Minus = ({ size = 12, ...p }: P) => <svg {...base(size, p)}><path d="M5 12h14" /></svg>;
+/** Paint bucket (cell fill). */
+export const Bucket = ({ size = 14, ...p }: P) => <svg {...base(size, p)}><path d="m19 11-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2a2 2 0 0 0 2.8 0L19 11Z" /><path d="m5 2 5 5" /><path d="M2 13h15" /><path d="M22 20a2 2 0 1 1-4 0c0-1.6 1.7-2.4 2-4 .3 1.6 2 2.4 2 4Z" /></svg>;
 export const Down = ({ size = 14, ...p }: P) => <svg {...base(size, p)}><path d="m6 9 6 6 6-6" /></svg>;
 export const Right = ({ size = 14, ...p }: P) => <svg {...base(size, p)}><path d="m9 6 6 6-6 6" /></svg>;
 export const Left = ({ size = 14, ...p }: P) => <svg {...base(size, p)}><path d="m15 6-6 6 6 6" /></svg>;
