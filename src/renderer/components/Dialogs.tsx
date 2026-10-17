@@ -12,6 +12,7 @@ import { applyNumberFormat, currentNumber } from '../visual/table';
 import { shortAuthor } from '../../shared/latex/refs';
 import { MathInput, type MathInputHandle } from './MathInput';
 import { texToHtml } from '../visual/nodes';
+import logoLarge from '../assets/logo-128.png';
 import { Search } from './Icons';
 
 /** Excel's "Format Cells → Number" for table cells. */
@@ -256,7 +257,7 @@ export function AboutDialog() {
   const close = () => setState({ dialog: null });
   return (
     <Dialog title="About TeXWriter" onClose={close} footer={<button className="btn btn-pri" onClick={close}>Close</button>}>
-      <div className="row" style={{ gap: 14 }}><span className="logo" style={{ width: 44, height: 44, fontSize: 26, borderRadius: 10 }}>Q</span>
+      <div className="row" style={{ gap: 14 }}><img src={logoLarge} alt="" width={52} height={52} style={{ flex: 'none' }} />
         <div><div style={{ fontWeight: 600, fontSize: 15 }}>TeXWriter {info?.version}</div><div className="small muted">LaTeX editor with a visual view, generated tables and figures, and reproducible PDF builds</div></div></div>
       <dl className="kv" style={{ gridTemplateColumns: '120px 1fr' }}>
         <dt>Electron</dt><dd>{info?.electron}</dd><dt>Chromium</dt><dd>{info?.chrome}</dd><dt>TeX</dt><dd>{tc?.distribution ?? 'not found'}{tc?.texBin ? ` · ${tc.texBin}` : ''}</dd>

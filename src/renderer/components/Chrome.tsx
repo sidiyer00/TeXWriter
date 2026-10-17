@@ -6,6 +6,7 @@ import { editorRef } from '../visual/editorRef';
 import { sourceViewRef } from './SourceEditor';
 import { undo, redo } from '@codemirror/commands';
 import { hash } from '../../shared/latex/scan';
+import logoSmall from '../assets/logo-64.png';
 import { Floating, MenuBar, below, type Anchor } from './Menu';
 
 export function useOutside(ref: React.RefObject<HTMLElement | null>, onOut: () => void) {
@@ -103,7 +104,7 @@ export function TitleBar({ crumb, center, right }: { crumb?: ReactNode; center?:
   const mac = api.platform === 'darwin';
   return (
     <header className={`titlebar ${mac ? 'mac' : ''}`}>
-      <button className="logo no-drag" aria-label="TeXWriter home" onClick={() => closeProject()}>Q</button>
+      <button className="logo no-drag" aria-label="TeXWriter home" title="Home" onClick={() => closeProject()}><img src={logoSmall} alt="" /></button>
       <MenuBar />
       <nav className="crumbs" aria-label="Breadcrumb">
         {project ? (

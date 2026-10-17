@@ -101,7 +101,9 @@ textarea.field { height: auto; padding: 7px 9px; resize: vertical; line-height: 
 .titlebar { flex: none; display: flex; align-items: center; gap: 12px; height: var(--titlebar-h); padding-left: 14px; padding-right: 150px; background: var(--chrome); border-bottom: 1px solid var(--rule); -webkit-app-region: drag; user-select: none; }
 .titlebar.mac { padding-left: 84px; padding-right: 14px; }
 .titlebar button, .titlebar a, .titlebar input, .titlebar select, .titlebar .no-drag { -webkit-app-region: no-drag; }
-.logo { width: 22px; height: 22px; border-radius: 5px; background: var(--ink); color: var(--chrome); display: grid; place-items: center; font-family: var(--serif); font-weight: 600; font-size: 14px; flex: none; border: 0; cursor: pointer; }
+.logo { width: 24px; height: 24px; padding: 0; background: none; display: grid; place-items: center; flex: none; border: 0; cursor: pointer; border-radius: 6px; }
+.logo img { width: 24px; height: 24px; display: block; }
+.logo:hover img { filter: brightness(1.12); }
 .crumbs { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; }
 .crumbs > * { flex: none; }
 .crumbs > .cur { flex: 0 1 auto; min-width: 24px; }
