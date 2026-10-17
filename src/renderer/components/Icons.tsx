@@ -57,3 +57,19 @@ const CLS: Record<string, string> = { passed: 'pass', failed: 'fail', warning: '
 export function StatusPill({ status, small, label }: { status: string; small?: boolean; label?: string }) {
   return <span className={`st ${CLS[status] ?? 'skip'} ${small ? 'st-sm' : ''}`}><StatusIcon status={status} />{label ?? LABEL[status] ?? status}</span>;
 }
+
+// table toolbar glyphs: a cell block plus the action (+ add, x delete, arrows for merge/split)
+const TI = { strokeWidth: 1.7 };
+export const RowAbove = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><rect x="3" y="12" width="18" height="9" rx="1.5" /><path d="M12 12v9M12 2.5v6M9 5.5h6" /></svg>;
+export const RowBelow = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><rect x="3" y="3" width="18" height="9" rx="1.5" /><path d="M12 3v9M12 15.5v6M9 18.5h6" /></svg>;
+export const RowDelete = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><rect x="3" y="7" width="18" height="10" rx="1.5" /><path d="m9.5 9.5 5 5M14.5 9.5l-5 5" /></svg>;
+export const ColLeft = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><rect x="12" y="3" width="9" height="18" rx="1.5" /><path d="M12 12h9M2.5 12h6M5.5 9v6" /></svg>;
+export const ColRight = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><rect x="3" y="3" width="9" height="18" rx="1.5" /><path d="M3 12h9M15.5 12h6M18.5 9v6" /></svg>;
+export const ColDelete = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><rect x="7" y="3" width="10" height="18" rx="1.5" /><path d="m9.5 9.5 5 5M14.5 9.5l-5 5" /></svg>;
+export const CellsMerge = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><rect x="3" y="5" width="18" height="14" rx="1.5" /><path d="M5.5 12h4M8 9.5l2 2.5-2 2.5M18.5 12h-4M16 9.5 14 12l2 2.5" /></svg>;
+export const CellSplit = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><rect x="3" y="5" width="18" height="14" rx="1.5" /><path d="M12 5v14M9.5 12h-4M7.5 9.5 5.5 12l2 2.5M14.5 12h4M16.5 9.5l2 2.5-2 2.5" /></svg>;
+export const AlignL = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><path d="M4 6h16M4 10h10M4 14h16M4 18h10" /></svg>;
+export const AlignC = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><path d="M4 6h16M7 10h10M4 14h16M7 18h10" /></svg>;
+export const AlignR = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><path d="M4 6h16M10 10h10M4 14h16M10 18h10" /></svg>;
+export const HeaderCells = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><rect x="3" y="4" width="18" height="16" rx="1.5" /><path d="M3 9.5h18M9 9.5V20M15 9.5V20" /><rect x="3" y="4" width="18" height="5.5" rx="1.5" fill="currentColor" stroke="none" /></svg>;
+export const HeaderLevel = ({ size = 18, ...p }: P) => <svg {...base(size, { ...TI, ...p })}><rect x="3" y="9" width="18" height="12" rx="1.5" /><path d="M3 14h18M12 14v7" /><rect x="3" y="9" width="18" height="5" rx="1.5" fill="currentColor" stroke="none" /><path d="M12 1.5v6M9 4.5h6" /></svg>;

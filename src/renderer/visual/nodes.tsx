@@ -18,7 +18,7 @@ import { Refresh, Link, Trash } from '../components/Icons';
 import { loadPdfCached, renderPage } from '../pdf';
 import { parseInline } from '../../shared/latex/inline';
 import { TextColor, TeXWriterHighlight } from './marks';
-import { TableBlock, QTable, QTableRow, QTableHeader, QTableCell } from './table';
+import { TableBlock, QTable, QTableRow, QTableHeader, QTableCell, TableDeleteKeys } from './table';
 import { SpreadsheetClipboard } from './clipboard';
 import { Find } from './find';
 import { isMod } from '../keys';
@@ -659,7 +659,7 @@ export function extensions() {
     QHeading,
     QCodeBlock,
     TextColor, TeXWriterHighlight,
-    TableBlock, QTable, QTableRow, QTableHeader, QTableCell,
+    TableBlock, QTable, QTableRow, QTableHeader, QTableCell, TableDeleteKeys,
     BlockMeta,
     ParagraphIndent,
     Numbering,

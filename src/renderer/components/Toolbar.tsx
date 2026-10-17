@@ -6,9 +6,9 @@ import { getState, promptText, setState, toast, togglePanel, useStore, mainFile,
 import { insertEquation, insertFigure, insertInlineMath, insertLink, newComment, insertMenu } from '../commands';
 import { MenuList, below, type Anchor } from './Menu';
 import { useOutside } from './Chrome';
-import { Bucket, Down, Indent, List, Menu as MenuIcon, OList, Outdent } from './Icons';
+import { AlignC, AlignL, AlignR, Bucket, CellSplit, CellsMerge, ColDelete, ColLeft, ColRight, Down, HeaderCells, HeaderLevel, Indent, List, Menu as MenuIcon, OList, Outdent, RowAbove, RowBelow, RowDelete } from './Icons';
 import { CELL_FILLS, HIGHLIGHTS, TEXT_COLORS, cssColor } from '../visual/marks';
-import { applyNumberFormat, columnAlignAt, currentCellFill, currentNumber, setCellFill, type FillScope, selectColumnOrRow, setCellValue, setColumnAlign, setTableBlockAttrs, tableBlockAt, currentColumns, addHeaderLevel } from '../visual/table';
+import { applyNumberFormat, columnAlignAt, currentCellFill, currentNumber, deleteColumns, deleteTable, setCellFill, type FillScope, selectColumnOrRow, setCellValue, setColumnAlign, setTableBlockAttrs, tableBlockAt, currentColumns, addHeaderLevel } from '../visual/table';
 import { copyTableForSpreadsheet } from '../visual/clipboard';
 import { HEADING_STYLES, MAX_HEADING, headingLevel, setBlockStyle, shiftHeading } from '../visual/headings';
 import { HEADER_FILLS, TABLE_SIZES, TABLE_SPACING, TABLE_STYLES } from '../../shared/latex/table';
@@ -227,12 +227,7 @@ export function addColumn(side: 'left' | 'right') {
 
 export function deleteColumn() {
   const ed = editorRef.current;
-  if (!ed) return;
-  const cols = currentColumns(ed);
-  const tb = tableBlockAt(ed);
-  const spec: string[] = String(tb?.node.attrs.cols || '').split(/\s+/).filter(Boolean);
-  ed.chain().focus().deleteColumn().run();
-  if (cols && tableBlockAt(ed)) { spec.splice(cols[0], cols[1] - cols[0]); setTableBlockAttrs(ed, { cols: spec.join(' ') }); }
+  if (ed) deleteColumns(ed);
 }
 
 const FILL_SCOPES: { id: FillScope; label: string; title: string }[] = [
@@ -256,7 +251,7 @@ function CellFill() {
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button className="tb" aria-label="Cell fill" title="Cell fill: colour the background of table cells" aria-haspopup="dialog" aria-expanded={open} onMouseDown={md} onClick={() => { if (!open) { setScope('cells'); setCustom(''); } setOpen(!open); }}>
-        <span className="fillglyph" aria-hidden="true"><Bucket size={14} /><i style={{ background: cur ? cssColor(cur) : 'transparent' }} /></span>Fill <Down size={10} />
+        <span className="fillglyph" aria-hidden="true"><Bucket size={14} /><i style={{ background: cur ? cssColor(cur) : 'transparent' }} /></span><Down size={10} />
       </button>
       {open && (
         <div className="menu swatches cellfill" role="dialog" aria-label="Cell fill" style={{ top: 32, left: 0, padding: 8 }}>
@@ -288,23 +283,6 @@ export function cellFillMenu(ed: import('@tiptap/react').Editor): MenuItem[] {
     { label: 'No fill', run: () => void setCellFill(ed, null, scope) },
   ];
   return FILL_SCOPES.map((s) => ({ label: s.id === 'cells' ? 'Selected cells' : s.id === 'table' ? 'Whole table' : `Whole ${s.label.toLowerCase()}`, submenu: sub(s.id) }));
-}
-
-/** Excel's formula bar for a table cell: the full-precision value behind the formatted text. */
-function ValueBox({ value, disabled }: { value: string | null; disabled: boolean }) {
-  const [v, setV] = useState(value ?? '');
-  const [bad, setBad] = useState(false);
-  useEffect(() => { setV(value ?? ''); setBad(false); }, [value]);
-  const commit = () => {
-    const ed = editorRef.current;
-    if (!ed || v === (value ?? '') || !v.trim()) return;
-    if (!setCellValue(ed, v)) setBad(true);
-  };
-  return (
-    <input className={`field mono tvalue ${bad ? 'bad' : ''}`} aria-label="Cell value (full precision)" title="Full-precision value of this cell. Type a number and press Enter." placeholder={disabled ? '' : 'Value'} disabled={disabled}
-      value={v} onChange={(e) => { setV(e.target.value); setBad(false); }} onBlur={commit}
-      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); editorRef.current?.commands.focus(); } if (e.key === 'Escape') { setV(value ?? ''); editorRef.current?.commands.focus(); } }} />
-  );
 }
 
 function TableToolbar() {
@@ -339,21 +317,20 @@ function TableToolbar() {
     { id: 'dec+', group: 'num', priority: 1, node: b('dec+', <span className="decglyph">.00<small>+</small></span>, () => step(1), 'Increase decimal (more digits)', undefined, !cur || cur.header), menu: { label: 'Increase decimal', run: () => step(1) } },
     { id: 'sep', group: 'num', priority: 2, node: b('sep', ',', () => applyNumberFormat(ed, (f) => (f && f.kind !== 'scientific' ? { ...f, thousands: !fmt?.thousands } : f)), 'Thousands separator (1,234)', !!fmt?.thousands, !canSep), menu: { label: 'Thousands separator', checked: !!fmt?.thousands, disabled: !canSep, run: () => applyNumberFormat(ed, (f) => (f && f.kind !== 'scientific' ? { ...f, thousands: !fmt?.thousands } : f)) } },
     { id: 'nfmt', group: 'num', priority: 2, node: b('nfmt', 'Format…', () => setState({ dialog: 'numberFormat' }), 'Number format: decimals or significant figures, currency, negatives…', undefined, !cur || cur.header), menu: { label: 'Number format…', run: () => setState({ dialog: 'numberFormat' }) } },
-    { id: 'nval', group: 'num', priority: 2, node: <ValueBox value={cur?.value ?? null} disabled={!cur || cur.header} />, menu: { label: 'Cell value…', disabled: !cur || cur.header, run: () => void promptText('Cell value', 'Full-precision value (the cell shows it in its number format)', cur?.value ?? '').then((v) => { if (v != null && !setCellValue(ed, v)) toast('Not a number.', 'err'); }) } },
     { id: 'cellfill', group: 'fill', priority: 1, node: <CellFill />, menu: { label: 'Cell fill', submenu: cellFillMenu(ed) } },
-    { id: 'row-above', group: 'rows', priority: 1, node: b('row-above', '+ Row above', () => c().addRowBefore().run()), menu: { label: 'Insert row above', run: () => c().addRowBefore().run() } },
-    { id: 'row-below', group: 'rows', priority: 1, node: b('row-below', '+ Row below', () => c().addRowAfter().run()), menu: { label: 'Insert row below', run: () => c().addRowAfter().run() } },
-    { id: 'col-left', group: 'cols', priority: 2, node: b('col-left', '+ Col left', () => addColumn('left')), menu: { label: 'Insert column left', run: () => addColumn('left') } },
-    { id: 'col-right', group: 'cols', priority: 2, node: b('col-right', '+ Col right', () => addColumn('right')), menu: { label: 'Insert column right', run: () => addColumn('right') } },
-    { id: 'del-row', group: 'del', priority: 4, node: b('del-row', 'Delete row', () => c().deleteRow().run()), menu: { label: 'Delete row', run: () => c().deleteRow().run() } },
-    { id: 'del-col', group: 'del', priority: 4, node: b('del-col', 'Delete column', deleteColumn), menu: { label: 'Delete column', run: deleteColumn } },
-    { id: 'merge', group: 'merge', priority: 2, node: b('merge', 'Merge cells', () => c().mergeCells().run(), 'Select cells by dragging, then merge'), menu: { label: 'Merge cells', run: () => c().mergeCells().run() } },
-    { id: 'split', group: 'merge', priority: 3, node: b('split', 'Split cell', () => c().splitCell().run()), menu: { label: 'Split cell', run: () => c().splitCell().run() } },
-    { id: 'hlevel', group: 'hdr', priority: 3, node: b('hlevel', '+ Header level', () => addHeaderLevel(ed), 'Add a header row above the table for group labels; select the cells a label spans and Merge cells'), menu: { label: 'Add header level', run: () => addHeaderLevel(ed) } },
-    { id: 'hdr', group: 'hdr', priority: 3, node: b('hdr', 'Header cells', () => c().toggleHeaderCell().run(), 'Toggle header styling for the selected cells (select a whole row for a second header level)'), menu: { label: 'Toggle header cells', run: () => c().toggleHeaderCell().run() } },
-    { id: 'al', group: 'align', priority: 3, node: b('al', 'Left', () => setColumnAlign(ed, 'l'), 'Align column left', align === 'l'), menu: { label: 'Align column left', run: () => setColumnAlign(ed, 'l') } },
-    { id: 'ac', group: 'align', priority: 3, node: b('ac', 'Centre', () => setColumnAlign(ed, 'c'), 'Centre column', align === 'c'), menu: { label: 'Centre column', run: () => setColumnAlign(ed, 'c') } },
-    { id: 'ar', group: 'align', priority: 3, node: b('ar', 'Right', () => setColumnAlign(ed, 'r'), 'Align column right', align === 'r'), menu: { label: 'Align column right', run: () => setColumnAlign(ed, 'r') } },
+    { id: 'row-above', group: 'rows', priority: 1, node: b('row-above', <RowAbove />, () => c().addRowBefore().run(), 'Insert row above'), menu: { label: 'Insert row above', run: () => c().addRowBefore().run() } },
+    { id: 'row-below', group: 'rows', priority: 1, node: b('row-below', <RowBelow />, () => c().addRowAfter().run(), 'Insert row below'), menu: { label: 'Insert row below', run: () => c().addRowAfter().run() } },
+    { id: 'del-row', group: 'rows', priority: 1, node: b('del-row', <RowDelete />, () => c().deleteRow().run(), 'Delete row (or select whole rows and press Backspace)'), menu: { label: 'Delete row', run: () => c().deleteRow().run() } },
+    { id: 'col-left', group: 'cols', priority: 1, node: b('col-left', <ColLeft />, () => addColumn('left'), 'Insert column left'), menu: { label: 'Insert column left', run: () => addColumn('left') } },
+    { id: 'col-right', group: 'cols', priority: 1, node: b('col-right', <ColRight />, () => addColumn('right'), 'Insert column right'), menu: { label: 'Insert column right', run: () => addColumn('right') } },
+    { id: 'del-col', group: 'cols', priority: 1, node: b('del-col', <ColDelete />, deleteColumn, 'Delete column (or select whole columns and press Backspace)'), menu: { label: 'Delete column', run: deleteColumn } },
+    { id: 'merge', group: 'merge', priority: 2, node: b('merge', <CellsMerge />, () => c().mergeCells().run(), 'Merge cells (select cells by dragging first)', undefined, !ed.can().mergeCells()), menu: { label: 'Merge cells', run: () => c().mergeCells().run() } },
+    { id: 'split', group: 'merge', priority: 2, node: b('split', <CellSplit />, () => c().splitCell().run(), 'Split merged cell', undefined, !ed.can().splitCell()), menu: { label: 'Split cell', run: () => c().splitCell().run() } },
+    { id: 'al', group: 'align', priority: 2, node: b('al', <AlignL />, () => setColumnAlign(ed, 'l'), 'Align column left', align === 'l'), menu: { label: 'Align column left', checked: align === 'l', run: () => setColumnAlign(ed, 'l') } },
+    { id: 'ac', group: 'align', priority: 2, node: b('ac', <AlignC />, () => setColumnAlign(ed, 'c'), 'Centre column', align === 'c'), menu: { label: 'Centre column', checked: align === 'c', run: () => setColumnAlign(ed, 'c') } },
+    { id: 'ar', group: 'align', priority: 2, node: b('ar', <AlignR />, () => setColumnAlign(ed, 'r'), 'Align column right', align === 'r'), menu: { label: 'Align column right', checked: align === 'r', run: () => setColumnAlign(ed, 'r') } },
+    { id: 'hdr', group: 'hdr', priority: 3, node: b('hdr', <HeaderCells />, () => c().toggleHeaderCell().run(), 'Toggle header cells (select a whole row for a second header level)'), menu: { label: 'Toggle header cells', run: () => c().toggleHeaderCell().run() } },
+    { id: 'hlevel', group: 'hdr', priority: 3, node: b('hlevel', <HeaderLevel />, () => addHeaderLevel(ed), 'Add header level: a header row above the table for group labels (select the cells a label spans, then Merge)'), menu: { label: 'Add header level', run: () => addHeaderLevel(ed) } },
     { id: 'tstyle', group: 'style', priority: 2, node: (
       <select className="field" aria-label="Table style" style={{ height: 28, width: 120 }} value={tb?.node.attrs.style ?? 'booktabs'} onChange={(e) => setTableBlockAttrs(ed, { style: e.target.value })}>
         {TABLE_STYLES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
@@ -361,6 +338,8 @@ function TableToolbar() {
   ];
   const ta = tb?.node.attrs ?? {};
   const extra: MenuItem[] = [
+    { label: 'Cell value…', disabled: !cur || cur.header, run: () => void promptText('Cell value', 'Full-precision value (the cell shows it in its number format)', cur?.value ?? '').then((v) => { if (v != null && !setCellValue(ed, v)) toast('Not a number.', 'err'); }) },
+    { separator: true },
     { label: 'Select column', run: () => selectColumnOrRow(ed, 'column') },
     { label: 'Select row', run: () => selectColumnOrRow(ed, 'row') },
     { separator: true },
@@ -372,7 +351,7 @@ function TableToolbar() {
     { separator: true },
     { label: 'Copy table for Excel', run: () => void copyTableForSpreadsheet(ed).then((ok) => ok && toast('Table copied. Paste it into Excel or Google Sheets; merged headers are kept.', 'ok')) },
     { label: 'Table properties', run: () => setState({ panel: { open: true, tab: 'properties' } }) },
-    { label: 'Delete table', danger: true, run: () => { const t = tableBlockAt(ed); if (t) ed.view.dispatch(ed.state.tr.delete(t.pos, t.pos + t.node.nodeSize)); } },
+    { label: 'Delete table', danger: true, run: () => deleteTable(ed) },
   ];
   void getState;
   return <div className="toolbar-float" ref={ref}><OverflowBar label="Table" items={items} extra={extra} /></div>;

@@ -1,7 +1,7 @@
 // Editable tables: TipTap's table schema wrapped in a `tableBlock` that carries the
 // LaTeX-level settings (caption, label, style, column alignment, spacing, header shading).
 // Body cells can carry an Excel-style number format (see shared/latex/numfmt.ts).
-import { Node } from '@tiptap/core';
+import { Extension, Node } from '@tiptap/core';
 import { NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps, type Editor } from '@tiptap/react';
 import { Table, TableRow, TableHeader, TableCell } from '@tiptap/extension-table';
 import { CellSelection, selectedRect } from '@tiptap/pm/tables';
@@ -387,3 +387,41 @@ export function addHeaderLevel(ed: Editor) {
   const after = tableBlockAt(ed);
   if (after) ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, after.pos + 5)));
 }
+
+/** Delete the selected columns, keeping the tableBlock's column spec in step. */
+export function deleteColumns(ed: Editor) {
+  const cols = currentColumns(ed);
+  const tb = tableBlockAt(ed);
+  const spec: string[] = String(tb?.node.attrs.cols || '').split(/\s+/).filter(Boolean);
+  ed.chain().focus().deleteColumn().run();
+  if (cols && tableBlockAt(ed)) { spec.splice(cols[0], cols[1] - cols[0]); setTableBlockAttrs(ed, { cols: spec.join(' ') }); }
+}
+
+/** Delete the whole table block around the selection. */
+export function deleteTable(ed: Editor) {
+  const t = tableBlockAt(ed);
+  if (t) ed.view.dispatch(ed.state.tr.delete(t.pos, t.pos + t.node.nodeSize));
+}
+
+/**
+ * Backspace / Delete on whole selected rows or columns removes them, as in a spreadsheet;
+ * on all cells it removes the table. Partial cell selections keep clearing cell contents.
+ */
+export const TableDeleteKeys = Extension.create({
+  name: 'tableDeleteKeys',
+  priority: 1000,
+  addKeyboardShortcuts() {
+    const run = () => {
+      const ed = this.editor as unknown as Editor;
+      const sel = ed.state.selection;
+      if (!(sel instanceof CellSelection)) return false;
+      const rows = sel.isRowSelection(), cols = sel.isColSelection();
+      if (rows && cols) deleteTable(ed);
+      else if (rows) ed.chain().focus().deleteRow().run();
+      else if (cols) deleteColumns(ed);
+      else return false;
+      return true;
+    };
+    return { Backspace: run, Delete: run, 'Mod-Backspace': run, 'Mod-Delete': run };
+  },
+});
