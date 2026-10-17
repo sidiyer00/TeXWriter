@@ -675,3 +675,9 @@ tr.pg-gap { display: table-row; }
 .menu .mcheck.micon.on { color: var(--accent); background: var(--accent-bg-2); border-radius: 4px; }
 .texglyph { font-family: var(--serif); font-size: 12.5px; letter-spacing: -.02em; }
 .texglyph::first-letter { letter-spacing: -.12em; }
+
+/* delete button beside equations, tables, figures, code, callouts, lists and LaTeX blocks */
+.blk-del { position: absolute; z-index: 4; width: 28px; height: 28px; display: none; align-items: center; justify-content: center; padding: 0; border: 1px solid #E8C4BC; border-radius: 6px; background: #FFF; color: #B3261E; cursor: pointer; box-shadow: 0 1px 3px rgba(31,30,28,.12); }
+.blk-del.show { display: inline-flex; }
+.blk-del:hover { background: #B3261E; border-color: #B3261E; color: #fff; }
+.blk-del:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
